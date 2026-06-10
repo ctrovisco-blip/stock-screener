@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Stock Screener</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: #131722; color: #c8ccd4; font-family: 'Inter', -apple-system, sans-serif; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: #131722; }
+  ::-webkit-scrollbar-thumb { background: #2a3042; border-radius: 3px; }
+  input, button, select { font-family: inherit; }
+  @media print {
+    @page { size: A4; margin: 12mm; }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .no-print { display: none !important; }
+    .screener-grid {
+      display: grid !important;
+      grid-template-columns: repeat(2, 1fr) !important;
+      gap: 10px !important;
+      padding: 0 !important;
+    }
+    .screener-card { break-inside: avoid; page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+const SCREENER_DATA = {}{};
+const BUILD_UPDATED = "2026-06-10 21:12 UTC";
+const FETCHED_AT    = "n/a";
+
+const GH_REPO               = "ctrovisco-blip/stock-screener";
+const GH_SCREENER_WORKFLOW  = "screener.yml";
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ── Sector colours ──────────────────────────────────────────────────────── */
+const SECTOR_COLORS = {
+  "ETF / ETC":             "#5b8af5",
+  "Technology":            "#4a9ede",
+  "Healthcare":            "#3ba899",
+  "Consumer Staples":      "#9d8fca",
+  "Energy":                "#c07c3a",
+  "Industrials":           "#b85c5c",
+  "Real Estate":           "#7c6bba",
+  "Consumer Discretionary":"#b0995a",
+  "Communication Services":"#5a8fc4",
+  "Utilities":             "#6e8fa8",
+  "Financial Services":    "#89a87c",
+  "Basic Materials":       "#c0965a",
+  "Outro":                 "#5a6478",
+};
+
+const LOGO_OVERRIDE = {};
+
+/* ── PDF export ──────────────────────────────────────────────────────────── */
+function generateReportHTML(cards) {
+  const today = new Date().toLocaleDateString('pt-PT');
+  const fmtPct    = (v, d=2) => v == null ? '—' : `${v.toFixed(d)}%`;
+  const fmtNum    = (v, d=1) => v == null ? '—' : v.toFixed(d);
+  const fmtStr    = (v)      => v == null ? '—' : String(v);
+  const fmtGrowth = (v, d=1) => v == null ? '—' : `${v>0?'+':''}${v.toFixed(d)}%`;
+  const peCol    = v => v==null?'#9ca3af':v<0?'#b91c1c':v<15?'#065f46':v<25?'#374151':v<40?'#92400e':'#b91c1c';
+  const pbCol    = v => v==null?'#9ca3af':v<1?'#065f46':v<3?'#374151':v<10?'#92400e':'#b91c1c';
+  const betaCol  = v => v==null?'#9ca3af':v<0.8?'#1e40af':v<1.2?'#374151':v<1.5?'#92400e':'#b91c1c';
+  const deCol    = v => v==null?'#9ca3af':v<50?'#065f46':v<100?'#374151':v<200?'#92400e':'#b91c1c';
+  const crCol    = v => v==null?'#9ca3af':v>=2?'#065f46':v>=1?'#374151':'#b91c1c';
+  const marginCol= v => v==null?'#9ca3af':v>50?'#065f46':v>25?'#374151':'#92400e';
+  const fcfCol   = v => v==null?'#9ca3af':v>15?'#065f46':v>0?'#374151':'#b91c1c';
+  const roeCol   = v => v==null?'#9ca3af':v>20?'#065f46':v>10?'#374151':v>0?'#92400e':'#b91c1c';
+  const growthCol= v => v==null?'#9ca3af':v>15?'#065f46':v>5?'#374151':v>0?'#92400e':'#b91c1c';
+  const yieldCol = v => v==null?'#9ca3af':v>=5?'#065f46':v>=2?'#374151':'#9ca3af';
+  const cagrCol  = v => v==null?'#9ca3af':v>10?'#065f46':v>0?'#374151':'#b91c1c';
+  const payoutCol= v => v==null?'#9ca3af':v<50?'#065f46':v<80?'#92400e':'#b91c1c';
+  const epsGrCol = v => v==null?'#9ca3af':v>20?'#065f46':v>5?'#374151':v>0?'#92400e':'#b91c1c';
+  const psCol    = v => v==null?'#9ca3af':v<2?'#065f46':v<5?'#374151':v<10?'#92400e':'#b91c1c';
+  const opMarCol = v => v==null?'#9ca3af':v>30?'#065f46':v>15?'#374151':v>0?'#92400e':'#b91c1c';
+  const upsideCol= v => v==null?'#9ca3af':v>20?'#065f46':v>0?'#374151':v>-10?'#92400e':'#b91c1c';
+
+  const sparkSVG = (values, color, w=72, h=24) => {
+    if (!values || values.length < 2) return '';
+    const mn = Math.min(...values), mx = Math.max(...values);
+    const range = mx - mn || 1, pad = 2;
+    const pts = values.map((v, i) => {
+      const x = pad + (i / (values.length-1)) * (w-pad*2);
+      const y = (h-pad) - ((v-mn)/range) * (h-pad*2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const lx = (pad+(w-pad*2)).toFixed(1);
+    const ly = ((h-pad)-((values[values.length-1]-mn)/range)*(h-pad*2)).toFixed(1);
+    return `<svg width="${w}" height="${h}" style="display:block;flex-shrink:0"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${lx}" cy="${ly}" r="2.5" fill="${color}"/></svg>`;
+  };
+
+  const priceSVG = (prices, w=540, h=90) => {
+    if (!prices || prices.length < 2) return '';
+    const mn = Math.min(...prices), mx = Math.max(...prices);
+    const range = mx - mn || 1, pad = 4;
+    const isUp = prices[prices.length-1] >= prices[0];
+    const cc = isUp ? '#059669' : '#dc2626';
+    const pts = prices.map((v, i) => {
+      const x = pad + (i/(prices.length-1))*(w-pad*2);
+      const y = (h-pad) - ((v-mn)/range)*(h-pad*2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const lp = pts[pts.length-1].split(',');
+    const baseY = (h-pad).toFixed(1);
+    const areaD = `M${pad},${baseY} L${pts.join(' L')} L${(w-pad).toFixed(1)},${baseY} Z`;
+    const pct = ((prices[prices.length-1]-prices[0])/prices[0]*100).toFixed(2);
+    return `<div style="margin-bottom:14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><span style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:1px">Gráfico de Preço</span><span style="font-size:11px;font-weight:700;color:${cc}">${pct>=0?'+':''}${pct}%</span></div><svg width="${w}" height="${h}" style="display:block;width:100%;border-radius:4px;background:#f8fafc;border:1px solid #e2e8f0"><defs><linearGradient id="pgpdf" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${cc}" stop-opacity="0.2"/><stop offset="100%" stop-color="${cc}" stop-opacity="0"/></linearGradient></defs><path d="${areaD}" fill="url(#pgpdf)"/><polyline points="${pts.join(' ')}" fill="none" stroke="${cc}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${lp[0]}" cy="${lp[1]}" r="3" fill="${cc}"/></svg></div>`;
+  };
+
+  const metric = (label, value, color, sparkValues) => `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:8px 10px"><div style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:5px">${label}</div><div style="display:flex;justify-content:space-between;align-items:flex-end;gap:6px"><div style="font-size:12px;font-weight:700;color:${color};font-variant-numeric:tabular-nums;line-height:1">${value}</div>${sparkValues ? sparkSVG(sparkValues, color) : ''}</div></div>`;
+  const sectionTitle = t => `<div style="font-size:8px;color:#9ca3af;letter-spacing:1.5px;text-transform:uppercase;margin:13px 0 6px 1px;font-weight:600">${t}</div>`;
+
+  const weekRangeHTML = (data, sym) => {
+    if (!data.week52Low || !data.week52High || !data.curPrice) return '';
+    const pct = Math.max(0, Math.min(100, (data.curPrice-data.week52Low)/(data.week52High-data.week52Low)*100));
+    return `<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 12px"><div style="display:flex;justify-content:space-between;margin-bottom:6px"><span style="font-size:9px;color:#9ca3af">${sym}${data.week52Low.toFixed(2)}</span><span style="font-size:8px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.5px">52 semanas</span><span style="font-size:9px;color:#9ca3af">${sym}${data.week52High.toFixed(2)}</span></div><div style="position:relative;height:5px;border-radius:3px;background:#e2e8f0"><div style="position:absolute;height:100%;border-radius:3px;background:linear-gradient(90deg,#ef5350 0%,#f97316 45%,#059669 100%);width:${pct}%"></div><div style="position:absolute;top:-4px;width:3px;height:13px;background:#374151;border-radius:2px;left:calc(${pct}% - 1.5px)"></div></div><div style="text-align:center;margin-top:4px;font-size:8px;color:#9ca3af">${pct.toFixed(0)}% do intervalo anual</div></div>`;
+  };
+
+  const cardHTML = ({ticker, data, chartPeriod='6M'}) => {
+    const sym = {EUR:'€',GBP:'£',USD:'$'}[data.currency] || data.currency || '$';
+    const periodPrices = ({ph1D:data.ph1D,ph6M:data.ph6M,ph5Y:data.ph5Y,phAll:data.phAll})[{['1D']:'ph1D',['6M']:'ph6M',['5Y']:'ph5Y',['All']:'phAll'}[chartPeriod]||'ph6M'] || data.ph6M || data.ph5Y || data.ph1D || data.phAll;
+    const targetUpside = (data.targetPrice && data.curPrice) ? ((data.targetPrice/data.curPrice-1)*100) : null;
+    return `<div class="page"><div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:14px;border-bottom:2px solid #e2e8f0;margin-bottom:14px"><div><div style="font-size:9px;color:#6b7280;margin-bottom:4px">${data.flag} ${data.exchange} · <span style="color:#2962ff;font-weight:700">${ticker}</span></div><div style="font-size:22px;font-weight:800;color:#111827;line-height:1.1;margin-bottom:6px">${data.name}</div><div style="display:flex;gap:10px;align-items:center">${data.curPrice!=null?`<span style="font-size:20px;font-weight:700;color:#111827">${sym}${data.curPrice.toFixed(2)}</span>`:''}<span style="font-size:9px;background:#eff6ff;color:#1d4ed8;border:1px solid #bfdbfe;border-radius:4px;padding:2px 8px;font-weight:600">${data.sector}</span></div></div><div style="text-align:right"><div style="font-size:11px;font-weight:700;color:#374151">Análise Fundamental</div><div style="font-size:9px;color:#9ca3af;margin-top:3px">Stock Screener</div><div style="font-size:9px;color:#9ca3af;margin-top:1px">${today}</div></div></div>${priceSVG(periodPrices)}${weekRangeHTML(data,sym)}${sectionTitle('Avaliação')}<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px">${metric('Market Cap',fmtStr(data.marketCap),'#374151')}${metric('P/E Ratio',fmtNum(data.pe),peCol(data.pe))}${metric('Price/Book',fmtNum(data.priceToBook),pbCol(data.priceToBook))}${metric('Price/Sales',fmtNum(data.priceToSales),psCol(data.priceToSales))}${metric('EV/EBITDA',fmtNum(data.evEbitda),psCol(data.evEbitda))}${metric('Beta',fmtNum(data.beta,2),betaCol(data.beta))}${metric('Debt/Equity',data.debtToEquity!=null?`${data.debtToEquity.toFixed(0)}%`:'—',deCol(data.debtToEquity))}${metric('Curr. Ratio',fmtNum(data.currentRatio,2),crCol(data.currentRatio))}${metric('Total Debt',fmtStr(data.totalDebt),data.totalDebt?'#92400e':'#9ca3af')}${metric('Preço Alvo',data.targetPrice!=null?`${sym}${data.targetPrice.toFixed(2)}${targetUpside!=null?` (${targetUpside>0?'+':''}${targetUpside.toFixed(0)}%)`:''}` :'—',upsideCol(targetUpside))}</div>${sectionTitle('Rentabilidade')}<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px">${metric('Gross Margin',fmtPct(data.grossMargin),marginCol(data.grossMargin),data.grossMarginHistory)}${metric('Op. Margin',fmtPct(data.operatingMargin),opMarCol(data.operatingMargin))}${metric('Net Margin',fmtPct(data.netMargin),marginCol(data.netMargin),data.netMarginHistory)}</div><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:5px">${metric('ROE',fmtPct(data.roe),roeCol(data.roe))}${metric('ROA',fmtPct(data.roa),roeCol(data.roa))}${metric('ROIC',fmtPct(data.roic),roeCol(data.roic))}${metric('FCF Yield',fmtPct(data.fcfYield),fcfCol(data.fcfYield),data.fcfHistory)}</div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;margin-top:5px">${metric('Rev. Growth',fmtGrowth(data.revenueGrowth),growthCol(data.revenueGrowth),data.revenueHistory)}</div>${sectionTitle('Por Ação')}<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px">${metric('Nº Acções',fmtStr(data.sharesOutstanding),'#374151')}${metric('EPS',data.eps!=null?`${sym}${data.eps.toFixed(2)}`:'—','#374151')}${metric('EPS Growth',fmtGrowth(data.epsGrowth),epsGrCol(data.epsGrowth))}</div>${sectionTitle('Retorno ao Acionista')}<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">${metric('Dividend Yield',fmtPct(data.divYield),yieldCol(data.divYield))}${metric('Buyback Yield',fmtPct(data.buybackYield),yieldCol(data.buybackYield))}${metric('Shareholder Yield',fmtPct(data.shareholderYield),yieldCol(data.shareholderYield))}${metric('Payout Ratio',data.payoutRatio!=null?`${data.payoutRatio.toFixed(1)}%`:'—',payoutCol(data.payoutRatio))}</div>${sectionTitle('Crescimento do Dividendo')}<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px;display:flex;justify-content:space-between;align-items:center"><div style="font-size:9px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.6px">Div CAGR 5 anos</div><div style="font-size:20px;font-weight:800;color:${cagrCol(data.divCagr5y)}">${data.divCagr5y!=null?fmtGrowth(data.divCagr5y,1):'—'}</div></div>${(data.insiderOwnership!=null||data.institutionalOwnership!=null||data.shortInterest!=null||data.analystBuy!=null)?`${sectionTitle('Acionariado')}<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">${data.insiderOwnership!=null?metric('Insiders',`${data.insiderOwnership.toFixed(1)}%`,data.insiderOwnership>5?'#065f46':'#374151'):''}${data.institutionalOwnership!=null?metric('Institucional',`${data.institutionalOwnership.toFixed(1)}%`,'#374151'):''}${data.shortInterest!=null?metric('Short Interest',`${data.shortInterest.toFixed(1)}%`,data.shortInterest>10?'#b91c1c':data.shortInterest>5?'#92400e':'#374151'):''}${data.analystBuy!=null?(()=>{const total=data.analystBuy+data.analystHold+data.analystSell;return metric(`Analistas (${total})`,`${data.analystBuy}B · ${data.analystHold}H · ${data.analystSell}S`,data.analystBuy/total>0.6?'#065f46':data.analystBuy/total>0.4?'#374151':'#92400e');})():''}</div>`:''} ${data.summary?`<div style="margin-top:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;padding:10px 14px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-size:8px;color:#9ca3af;letter-spacing:1px;text-transform:uppercase">Análise</span><span style="font-size:9px;font-weight:700;padding:2px 10px;border-radius:20px;background:${data.summary.verdictColor}22;color:${data.summary.verdictColor};border:1px solid ${data.summary.verdictColor}55">${data.summary.verdict}</span></div><p style="font-size:10px;color:#6b7280;line-height:1.55;margin:0">${data.summary.text}</p></div>`:''}<div style="margin-top:14px;padding-top:10px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between"><span style="font-size:8px;color:#d1d5db">ctrovisco-blip.github.io/stock-screener</span>${data.fetchedAt?`<span style="font-size:8px;color:#d1d5db">Dados: ${data.fetchedAt}</span>`:''}</div></div>`;
+  };
+
+  return `<!DOCTYPE html><html lang="pt"><head><meta charset="UTF-8"/><title>Screener — ${cards.map(c=>c.ticker).join(', ')}</title><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet"/><style>*{box-sizing:border-box;margin:0;padding:0;}body{font-family:'Inter',-apple-system,sans-serif;background:white;color:#111827;-webkit-print-color-adjust:exact;print-color-adjust:exact;}@page{size:A4;margin:12mm;}.page{min-height:calc(297mm - 24mm);padding:0;page-break-after:always;}.page:last-child{page-break-after:avoid;}</style></head><body>${cards.map(c=>cardHTML(c)).join('\n')}<script>window.onload=function(){window.print();}<\/script></body></html>`;
+}
+
+function openPDF(cards) {
+  const html = generateReportHTML(cards);
+  const win = window.open('', '_blank');
+  if (!win) { alert('Permite pop-ups para exportar PDF.'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
+/* ── LogoImg ─────────────────────────────────────────────────────────────── */
+function LogoImg({ ticker, sector, flag, size = 20 }) {
+  const [err, setErr] = useState(false);
+  const col = SECTOR_COLORS[sector] || "#5a6478";
+  const initial = (ticker || "?")[0].toUpperCase();
+  if (err) return (
+    <div style={{width:size,height:size,borderRadius:"5px",background:col+"22",
+      border:`1px solid ${col}44`,display:"flex",alignItems:"center",justifyContent:"center",
+      fontSize:size*0.44,fontWeight:"700",color:col,flexShrink:0,fontFamily:"'Inter',sans-serif"}}>
+      {flag || initial}
+    </div>
+  );
+  const src = LOGO_OVERRIDE[ticker] || `https://assets.parqet.com/logos/symbol/${ticker}?format=svg`;
+  return (
+    <img src={src} width={size} height={size}
+      style={{borderRadius:"5px",objectFit:"contain",background:"#d1d4dc",flexShrink:0}}
+      onError={() => setErr(true)} alt={ticker}/>
+  );
+}
+
+/* ── ScreenerFetchBar ────────────────────────────────────────────────────── */
+function ScreenerFetchBar() {
+  const [tickers,  setTickers]  = useState("");
+  const [mode,     setMode]     = useState("add");
+  const [status,   setStatus]   = useState("idle");
+  const [token,    setToken]    = useState(() => localStorage.getItem("gh_pat") || "");
+  const [patInput, setPatInput] = useState("");
+  const [errMsg,   setErrMsg]   = useState("");
+  const modalRef = useRef(null);
+
+  useEffect(() => {
+    if (status !== "pat-needed") return;
+    const h = e => { if (modalRef.current && !modalRef.current.contains(e.target)) setStatus("idle"); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [status]);
+
+  const doFetch = async (pat) => {
+    setStatus("running");
+    try {
+      const res = await fetch(
+        `https://api.github.com/repos/${GH_REPO}/actions/workflows/${GH_SCREENER_WORKFLOW}/dispatches`,
+        {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${pat}`,
+            "Accept":        "application/vnd.github+json",
+            "Content-Type":  "application/json",
+          },
+          body: JSON.stringify({ ref: "main", inputs: { tickers: tickers.trim(), mode } }),
+        }
+      );
+      if (res.status === 204) {
+        setStatus("ok");
+        setTimeout(() => setStatus("idle"), 10000);
+      } else {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.message || `HTTP ${res.status}`);
+      }
+    } catch(e) {
+      setErrMsg(e.message);
+      setStatus("err");
+      setTimeout(() => setStatus("idle"), 5000);
+    }
+  };
+
+  const handleFetch = () => {
+    if (!tickers.trim() || status === "running") return;
+    if (token) { doFetch(token); return; }
+    setStatus("pat-needed");
+  };
+
+  const handlePatSave = () => {
+    const pat = patInput.trim();
+    if (!pat) return;
+    localStorage.setItem("gh_pat", pat);
+    setToken(pat);
+    doFetch(pat);
+  };
+
+  const btnColor = status==="ok"?"#22C55E":status==="err"?"#ef5350":status==="running"?"#F59E0B":"#2962ff";
+  const btnLabel = status==="running"?"⏳ A correr...":status==="ok"?"✓ Pedido enviado!":status==="err"?"✗ Erro":"Obter dados";
+
+  return (
+    <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}}>
+      <input
+        value={tickers}
+        onChange={e => setTickers(e.target.value)}
+        onKeyDown={e => e.key === "Enter" && handleFetch()}
+        placeholder="AAPL, MSFT, NVDA..."
+        style={{minWidth:"200px",maxWidth:"360px",flex:"1",background:"#131722",
+          border:"1px solid #2a3042",borderRadius:"6px",padding:"6px 10px",
+          color:"#c8ccd4",fontSize:"11px",outline:"none"}}
+      />
+      <div style={{display:"flex",gap:"2px",flexShrink:0}}>
+        {[["add","Adicionar"],["replace","Substituir"]].map(([k,l]) => (
+          <button key={k} onClick={() => setMode(k)} style={{fontSize:"9px",padding:"5px 10px",
+            borderRadius:"20px",cursor:"pointer",border: mode===k?"1px solid #5a6478":"1px solid transparent",
+            background: mode===k?"#1e2438":"transparent",color: mode===k?"#c8ccd4":"#6b7280",transition:"all 0.12s"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+      <div style={{position:"relative",flexShrink:0}}>
+        <button onClick={handleFetch}
+          disabled={!tickers.trim() || status === "running"}
+          style={{fontSize:"10px",fontWeight:"600",padding:"6px 14px",borderRadius:"6px",cursor:"pointer",
+            background:`${btnColor}22`,border:`1px solid ${!tickers.trim()?"#2a3042":btnColor}`,
+            color:!tickers.trim()?"#5a6478":btnColor,transition:"all 0.15s"}}>
+          {btnLabel}
+        </button>
+        {status === "pat-needed" && (
+          <div ref={modalRef} style={{position:"absolute",top:"calc(100% + 6px)",left:0,zIndex:200,
+            background:"#1e2438",border:"1px solid #2a3042",borderRadius:"10px",padding:"14px",
+            width:"270px",boxShadow:"0 8px 32px #00000099"}}>
+            <div style={{fontSize:"9px",fontWeight:"600",color:"#c8ccd4",marginBottom:"4px"}}>
+              GitHub Personal Access Token
+            </div>
+            <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"10px",lineHeight:1.6}}>
+              Scope necessário: <span style={{color:"#2962ff",fontFamily:"monospace"}}>workflow</span>.{" "}
+              <a href="https://github.com/settings/tokens/new?scopes=workflow&description=Stock+Screener"
+                target="_blank" rel="noopener" style={{color:"#2962ff",textDecoration:"none"}}>
+                Criar token ↗
+              </a>
+            </div>
+            <input autoFocus value={patInput} onChange={e => setPatInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handlePatSave()}
+              type="password" placeholder="ghp_xxxxxxxxxxxx"
+              style={{width:"100%",background:"#131722",border:"1px solid #2a3042",
+                borderRadius:"6px",padding:"6px 8px",color:"#c8ccd4",fontSize:"10px",
+                fontFamily:"monospace",outline:"none",marginBottom:"8px"}}/>
+            <div style={{display:"flex",gap:"6px",justifyContent:"flex-end"}}>
+              <button onClick={() => setStatus("idle")}
+                style={{fontSize:"9px",color:"#6b7280",background:"transparent",
+                  border:"1px solid #2a3042",borderRadius:"5px",padding:"4px 10px",cursor:"pointer"}}>
+                Cancelar
+              </button>
+              <button onClick={handlePatSave}
+                style={{fontSize:"9px",color:"#e0e3eb",background:"#2962ff",
+                  border:"1px solid #2962ff",borderRadius:"5px",padding:"4px 12px",fontWeight:"600",cursor:"pointer"}}>
+                Guardar & Correr
+              </button>
+            </div>
+            <div style={{fontSize:"9px",color:"#2a3042",marginTop:"8px",lineHeight:1.5}}>
+              Token guardado apenas neste browser (localStorage).
+            </div>
+          </div>
+        )}
+        {status === "err" && (
+          <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,zIndex:200,
+            background:"#1A0000",border:"1px solid #7F1D1D",borderRadius:"6px",
+            padding:"8px 10px",width:"220px",fontSize:"9px",color:"#F87171"}}>
+            {errMsg}
+          </div>
+        )}
+      </div>
+      {status === "ok" && (
+        <span style={{fontSize:"9px",color:"#6b7280",letterSpacing:"0.3px"}}>
+          Aguarda ~1-2 min e actualiza a página
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* ── ScreenerCard ────────────────────────────────────────────────────────── */
+function ScreenerCard({ ticker, data, onRemove, onDelete }) {
+  const col = SECTOR_COLORS[data.sector] || "#5a6478";
+
+  const fmtPct = (v, d=2) => v == null ? "—" : `${v.toFixed(d)}%`;
+  const fmtNum = (v, d=1) => v == null ? "—" : v.toFixed(d);
+  const fmtStr = (v)       => v == null ? "—" : String(v);
+
+  const yieldCol   = v => v==null?"#6b7280":v>=5?"#089981":v>=2?"#c8ccd4":"#5a6478";
+  const peCol      = v => v==null?"#6b7280":v<0?"#ef5350":v<15?"#089981":v<25?"#c8ccd4":v<40?"#F0883E":"#ef5350";
+  const pbCol      = v => v==null?"#6b7280":v<1?"#089981":v<3?"#c8ccd4":v<10?"#F0883E":"#ef5350";
+  const betaCol    = v => v==null?"#6b7280":v<0.8?"#5b8af5":v<1.2?"#c8ccd4":v<1.5?"#F0883E":"#ef5350";
+  const deCol      = v => v==null?"#6b7280":v<50?"#089981":v<100?"#c8ccd4":v<200?"#F0883E":"#ef5350";
+  const crCol      = v => v==null?"#6b7280":v>=2?"#089981":v>=1?"#c8ccd4":"#ef5350";
+  const cagrCol    = v => v==null?"#6b7280":v>10?"#089981":v>0?"#c8ccd4":"#ef5350";
+  const payoutCol  = v => v==null?"#6b7280":v<50?"#089981":v<80?"#F0883E":"#ef5350";
+  const marginCol  = v => v==null?"#6b7280":v>50?"#089981":v>25?"#c8ccd4":"#F0883E";
+  const fcfCol     = v => v==null?"#6b7280":v>15?"#089981":v>0?"#c8ccd4":"#ef5350";
+  const roeCol     = v => v==null?"#6b7280":v>20?"#089981":v>10?"#c8ccd4":v>0?"#F0883E":"#ef5350";
+  const growthCol  = v => v==null?"#6b7280":v>15?"#089981":v>5?"#c8ccd4":v>0?"#F0883E":"#ef5350";
+  const epsGrCol   = v => v==null?"#6b7280":v>20?"#089981":v>5?"#c8ccd4":v>0?"#F0883E":"#ef5350";
+  const psCol      = v => v==null?"#6b7280":v<2?"#089981":v<5?"#c8ccd4":v<10?"#F0883E":"#ef5350";
+  const opMarCol   = v => v==null?"#6b7280":v>30?"#089981":v>15?"#c8ccd4":v>0?"#F0883E":"#ef5350";
+  const upsideCol  = v => v==null?"#6b7280":v>20?"#089981":v>0?"#c8ccd4":v>-10?"#F0883E":"#ef5350";
+
+  const [chartPeriod, setChartPeriod] = useState("6M");
+
+  const PriceChart = () => {
+    const periodMap = {"1D":data.ph1D,"6M":data.ph6M,"5Y":data.ph5Y,"All":data.phAll};
+    const prices = periodMap[chartPeriod] || [];
+    const available = Object.keys(periodMap).filter(k => periodMap[k] && periodMap[k].length >= 2);
+    if (prices.length < 2 && available.length === 0) return null;
+    const activePrices = prices.length >= 2 ? prices : (periodMap[available[0]] || []);
+    if (activePrices.length < 2) return null;
+    const mn = Math.min(...activePrices), mx = Math.max(...activePrices);
+    const range = mx - mn || 1;
+    const W = 300, H = 80, pad = 3;
+    const isUp = activePrices[activePrices.length-1] >= activePrices[0];
+    const cc = isUp ? "#089981" : "#ef5350";
+    const pts = activePrices.map((v, i) => {
+      const x = pad + (i/(activePrices.length-1))*(W-pad*2);
+      const y = (H-pad) - ((v-mn)/range)*(H-pad*2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+    const lastPt = pts[pts.length-1].split(",");
+    const baseY = (H-pad).toFixed(1);
+    const areaD = `M${pad},${baseY} L${pts.join(" L")} L${(W-pad).toFixed(1)},${baseY} Z`;
+    const pricePct = ((activePrices[activePrices.length-1]-activePrices[0])/activePrices[0]*100);
+    const gradId = `pg_${ticker}`;
+    return (
+      <div style={{marginBottom:"8px"}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"4px"}}>
+          <span style={{fontSize:"10px",color:cc,fontWeight:"700",fontVariantNumeric:"tabular-nums"}}>
+            {pricePct >= 0 ? "+" : ""}{pricePct.toFixed(2)}%
+          </span>
+          <div style={{display:"flex",gap:"2px"}}>
+            {["1D","6M","5Y","All"].filter(p => periodMap[p] && periodMap[p].length >= 2).map(p => (
+              <button key={p} onClick={() => setChartPeriod(p)}
+                style={{background:chartPeriod===p?cc+"33":"transparent",
+                  border:`1px solid ${chartPeriod===p?cc+"66":"#2a3042"}`,
+                  color:chartPeriod===p?cc:"#5a6478",fontSize:"9px",padding:"1px 6px",
+                  borderRadius:"3px",cursor:"pointer",fontWeight:chartPeriod===p?"700":"400",transition:"all 0.12s"}}>
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
+        <svg width={W} height={H} style={{width:"100%",display:"block",borderRadius:"4px"}}>
+          <defs>
+            <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={cc} stopOpacity="0.25"/>
+              <stop offset="100%" stopColor={cc} stopOpacity="0.02"/>
+            </linearGradient>
+          </defs>
+          <path d={areaD} fill={`url(#${gradId})`}/>
+          <polyline points={pts.join(" ")} fill="none" stroke={cc} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          <circle cx={lastPt[0]} cy={lastPt[1]} r="2.5" fill={cc}/>
+        </svg>
+      </div>
+    );
+  };
+
+  const MiniSparkline = ({ values, color: sc = "#5a6478" }) => {
+    if (!values || values.length < 2) return null;
+    const mn = Math.min(...values), mx = Math.max(...values);
+    const range = mx - mn || 1;
+    const W = 48, H = 18, pad = 2;
+    const pts = values.map((v, i) => {
+      const x = pad + (i/(values.length-1))*(W-pad*2);
+      const y = (H-pad) - ((v-mn)/range)*(H-pad*2);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(" ");
+    const lx = (W-pad).toFixed(1);
+    const ly = ((H-pad)-((values[values.length-1]-mn)/range)*(H-pad*2)).toFixed(1);
+    return (
+      <svg width={W} height={H} style={{flexShrink:0,opacity:0.9}}>
+        <polyline points={pts} fill="none" stroke={sc} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        <circle cx={lx} cy={ly} r="2" fill={sc}/>
+      </svg>
+    );
+  };
+
+  const CardItem = ({label, value, color, history}) => (
+    <div style={{background:"#131722",borderRadius:"5px",padding:"7px 9px",border:"1px solid #1e2438"}}>
+      <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"4px",letterSpacing:"0.5px",textTransform:"uppercase"}}>{label}</div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:"4px"}}>
+        <div style={{fontSize:"11px",color:color||"#c8ccd4",fontWeight:"600",fontVariantNumeric:"tabular-nums"}}>{value}</div>
+        {history && history.length >= 2 && <MiniSparkline values={history} color={color||"#5a6478"}/>}
+      </div>
+    </div>
+  );
+
+  const Section = ({title}) => (
+    <div style={{fontSize:"9px",color:"#5a6478",letterSpacing:"1.5px",margin:"10px 0 5px 1px",textTransform:"uppercase"}}>{title}</div>
+  );
+
+  const currencySymbol = {EUR:"€",GBP:"£",USD:"$"}[data.currency] || data.currency || "$";
+
+  const WeekRange = () => {
+    if (!data.week52Low || !data.week52High || !data.curPrice) return null;
+    const pct = Math.max(0, Math.min(100, (data.curPrice-data.week52Low)/(data.week52High-data.week52Low)*100));
+    return (
+      <div style={{background:"#131722",borderRadius:"5px",padding:"9px 11px",border:"1px solid #1e2438"}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:"5px",alignItems:"center"}}>
+          <span style={{fontSize:"9px",color:"#5a6478"}}>{currencySymbol}{data.week52Low.toFixed(2)}</span>
+          <span style={{fontSize:"9px",color:"#6b7280",letterSpacing:"0.5px",textTransform:"uppercase"}}>52 semanas</span>
+          <span style={{fontSize:"9px",color:"#5a6478"}}>{currencySymbol}{data.week52High.toFixed(2)}</span>
+        </div>
+        <div style={{position:"relative",height:"4px",borderRadius:"2px",background:"#1e2438"}}>
+          <div style={{position:"absolute",height:"100%",borderRadius:"2px",
+            background:"linear-gradient(90deg,#ef5350 0%,#F0883E 45%,#089981 100%)",width:`${pct}%`}}/>
+          <div style={{position:"absolute",top:"-4px",width:"2px",height:"12px",
+            background:"#e0e3eb",borderRadius:"1px",left:`calc(${pct}% - 1px)`}}/>
+        </div>
+        <div style={{textAlign:"center",marginTop:"4px",fontSize:"8px",color:"#5a6478"}}>
+          {pct.toFixed(0)}% do intervalo anual
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="screener-card" style={{background:"#1a1f2e",borderRadius:"8px",border:"1px solid #2a3042",padding:"12px"}}>
+      <div style={{borderLeft:"3px solid #2962ff",paddingLeft:"10px",marginBottom:"12px",
+        display:"flex",alignItems:"flex-start",gap:"8px"}}>
+        <LogoImg ticker={ticker} sector={data.sector} flag={data.flag} size={24}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:"9px",color:"#787b86",marginBottom:"2px",display:"flex",alignItems:"center",gap:"6px",flexWrap:"wrap"}}>
+            <span>{data.flag} {data.exchange} · <span style={{color:"#2962ff"}}>{ticker}</span></span>
+          </div>
+          <div style={{fontSize:"14px",fontWeight:"700",color:"#e0e3eb",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{data.name}</div>
+          <div style={{display:"flex",gap:"8px",marginTop:"4px",alignItems:"center",flexWrap:"wrap"}}>
+            {data.curPrice != null && (
+              <span style={{fontSize:"14px",fontWeight:"600",color:"#c8ccd4",fontVariantNumeric:"tabular-nums"}}>
+                {currencySymbol}{data.curPrice.toFixed(2)}
+              </span>
+            )}
+            <span style={{fontSize:"9px",background:col+"22",color:col,border:`1px solid ${col}44`,borderRadius:"3px",padding:"2px 7px"}}>
+              {data.sector}
+            </span>
+          </div>
+        </div>
+        <div className="no-print" style={{display:"flex",gap:"3px",flexShrink:0}}>
+          <button onClick={() => openPDF([{ticker, data, chartPeriod}])}
+            title="Exportar PDF"
+            style={{background:"transparent",border:"1px solid #2a3042",color:"#5a6478",
+              cursor:"pointer",fontSize:"11px",padding:"3px 7px",lineHeight:1,borderRadius:"4px",transition:"all 0.12s"}}
+            onMouseEnter={e=>{e.currentTarget.style.color="#5b8af5";e.currentTarget.style.borderColor="#5b8af544";}}
+            onMouseLeave={e=>{e.currentTarget.style.color="#5a6478";e.currentTarget.style.borderColor="#2a3042";}}>⎙</button>
+          {onRemove && (
+            <button onClick={() => onRemove(ticker)} title="Ocultar"
+              style={{background:"transparent",border:"1px solid #2a3042",color:"#5a6478",
+                cursor:"pointer",fontSize:"12px",padding:"3px 7px",lineHeight:1,borderRadius:"4px",transition:"all 0.12s"}}
+              onMouseEnter={e=>{e.currentTarget.style.color="#c8ccd4";e.currentTarget.style.borderColor="#5a6478";}}
+              onMouseLeave={e=>{e.currentTarget.style.color="#5a6478";e.currentTarget.style.borderColor="#2a3042";}}>×</button>
+          )}
+          {onDelete && (
+            <button onClick={() => onDelete(ticker)} title="Apagar definitivamente"
+              style={{background:"transparent",border:"1px solid #2a3042",color:"#5a6478",
+                cursor:"pointer",fontSize:"11px",padding:"3px 7px",lineHeight:1,borderRadius:"4px",transition:"all 0.12s"}}
+              onMouseEnter={e=>{e.currentTarget.style.color="#ef5350";e.currentTarget.style.borderColor="#ef535044";}}
+              onMouseLeave={e=>{e.currentTarget.style.color="#5a6478";e.currentTarget.style.borderColor="#2a3042";}}>🗑</button>
+          )}
+        </div>
+      </div>
+
+      <PriceChart/>
+      <WeekRange/>
+
+      <Section title="Avaliação"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px"}}>
+        <CardItem label="Market Cap"  value={fmtStr(data.marketCap)}    color="#c8ccd4"/>
+        <CardItem label="P/E Ratio"   value={fmtNum(data.pe)}           color={peCol(data.pe)}/>
+        <CardItem label="Price/Book"  value={fmtNum(data.priceToBook)}  color={pbCol(data.priceToBook)}/>
+        <CardItem label="Price/Sales" value={fmtNum(data.priceToSales)} color={psCol(data.priceToSales)}/>
+        <CardItem label="EV/EBITDA"   value={fmtNum(data.evEbitda)}     color={psCol(data.evEbitda)}/>
+        <CardItem label="Beta"        value={fmtNum(data.beta,2)}       color={betaCol(data.beta)}/>
+        <CardItem label="Debt/Equity" value={data.debtToEquity!=null?`${data.debtToEquity.toFixed(0)}%`:"—"} color={deCol(data.debtToEquity)}/>
+        <CardItem label="Curr. Ratio" value={fmtNum(data.currentRatio,2)} color={crCol(data.currentRatio)}/>
+        <CardItem label="Total Debt"  value={fmtStr(data.totalDebt)}    color={data.totalDebt?"#F0883E":"#6b7280"}/>
+        {(() => {
+          const upside = (data.targetPrice && data.curPrice) ? ((data.targetPrice/data.curPrice-1)*100) : null;
+          const label = data.targetPrice != null
+            ? `${currencySymbol}${data.targetPrice.toFixed(2)}${upside!=null?` (${upside>0?"+":""}${upside.toFixed(0)}%)`:""}`
+            : "—";
+          return <CardItem label="Preço Alvo" value={label} color={upsideCol(upside)}/>;
+        })()}
+      </div>
+
+      <Section title="Rentabilidade"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px"}}>
+        <CardItem label="Gross Margin" value={fmtPct(data.grossMargin)}     color={marginCol(data.grossMargin)} history={data.grossMarginHistory}/>
+        <CardItem label="Op. Margin"   value={fmtPct(data.operatingMargin)} color={opMarCol(data.operatingMargin)}/>
+        <CardItem label="Net Margin"   value={fmtPct(data.netMargin)}       color={marginCol(data.netMargin)}   history={data.netMarginHistory}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"4px",marginTop:"4px"}}>
+        <CardItem label="ROE"       value={fmtPct(data.roe)}    color={roeCol(data.roe)}/>
+        <CardItem label="ROA"       value={fmtPct(data.roa)}    color={roeCol(data.roa)}/>
+        <CardItem label="ROIC"      value={fmtPct(data.roic)}   color={roeCol(data.roic)}/>
+        <CardItem label="FCF Yield" value={fmtPct(data.fcfYield)} color={fcfCol(data.fcfYield)} history={data.fcfHistory}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px",marginTop:"4px"}}>
+        <CardItem label="Rev. Growth"
+          value={data.revenueGrowth!=null?`${data.revenueGrowth>0?"+":""}${data.revenueGrowth.toFixed(1)}%`:"—"}
+          color={growthCol(data.revenueGrowth)} history={data.revenueHistory}/>
+      </div>
+
+      <Section title="Por Ação"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px"}}>
+        <CardItem label="Nº Acções"  value={fmtStr(data.sharesOutstanding)} color="#c8ccd4"/>
+        <CardItem label="EPS"        value={data.eps!=null?`${currencySymbol}${data.eps.toFixed(2)}`:"—"} color="#c8ccd4"/>
+        <CardItem label="EPS Growth" value={data.epsGrowth!=null?`${data.epsGrowth>0?"+":""}${data.epsGrowth.toFixed(1)}%`:"—"} color={epsGrCol(data.epsGrowth)}/>
+      </div>
+
+      <Section title="Retorno ao Acionista"/>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px"}}>
+        <CardItem label="Dividend Yield"    value={fmtPct(data.divYield)}         color={yieldCol(data.divYield)}/>
+        <CardItem label="Buyback Yield"     value={fmtPct(data.buybackYield)}     color={yieldCol(data.buybackYield)}/>
+        <CardItem label="Shareholder Yield" value={fmtPct(data.shareholderYield)} color={yieldCol(data.shareholderYield)}/>
+        <CardItem label="Payout Ratio"      value={fmtPct(data.payoutRatio,1)}    color={payoutCol(data.payoutRatio)}/>
+      </div>
+
+      <Section title="Crescimento do Dividendo"/>
+      <div style={{background:"#131722",borderRadius:"5px",padding:"9px 11px",border:"1px solid #1e2438",
+        display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:"9px",color:"#6b7280",letterSpacing:"0.5px",textTransform:"uppercase"}}>Div CAGR 5 anos</div>
+        <div style={{display:"flex",alignItems:"center",gap:"8px",flexShrink:0}}>
+          <div style={{fontSize:"15px",color:cagrCol(data.divCagr5y),fontWeight:"700",
+            fontFamily:"'Inter',sans-serif",minWidth:"52px",textAlign:"right"}}>
+            {data.divCagr5y!=null?`${data.divCagr5y>0?"+":""}${data.divCagr5y.toFixed(1)}%`:"—"}
+          </div>
+          {data.divCagr5y!=null && (
+            <div style={{position:"relative",width:"50px",height:"4px",borderRadius:"2px",background:"#1e2438",flexShrink:0}}>
+              <div style={{position:"absolute",left:"50%",top:"-2px",width:"1px",height:"8px",background:"#5a6478"}}/>
+              <div style={{position:"absolute",height:"100%",borderRadius:"2px",
+                background:cagrCol(data.divCagr5y),
+                left:data.divCagr5y>=0?"50%":`${Math.max(0,50-Math.min(50,Math.abs(data.divCagr5y)*1.5))}%`,
+                width:`${Math.min(50,Math.abs(data.divCagr5y)*1.5)}%`}}/>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {(data.insiderOwnership!=null||data.institutionalOwnership!=null||data.shortInterest!=null||data.analystBuy!=null) && (
+        <>
+          <Section title="Acionariado"/>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px"}}>
+            {data.insiderOwnership!=null && (
+              <CardItem label="Insiders" value={`${data.insiderOwnership.toFixed(1)}%`}
+                color={data.insiderOwnership>5?"#089981":"#c8ccd4"}/>
+            )}
+            {data.institutionalOwnership!=null && (
+              <CardItem label="Institucional" value={`${data.institutionalOwnership.toFixed(1)}%`} color="#c8ccd4"/>
+            )}
+            {data.shortInterest!=null && (
+              <CardItem label="Short Interest" value={`${data.shortInterest.toFixed(1)}%`}
+                color={data.shortInterest>10?"#ef5350":data.shortInterest>5?"#F0883E":"#c8ccd4"}/>
+            )}
+            {data.analystBuy!=null && (() => {
+              const total = data.analystBuy+data.analystHold+data.analystSell;
+              const label = `${data.analystBuy}B · ${data.analystHold}H · ${data.analystSell}S`;
+              const buyPct = data.analystBuy/total;
+              return <CardItem label={`Analistas (${total})`} value={label}
+                color={buyPct>0.6?"#089981":buyPct>0.4?"#c8ccd4":"#F0883E"}/>;
+            })()}
+          </div>
+        </>
+      )}
+
+      {data.summary && (
+        <div style={{marginTop:"10px",background:"#131722",borderRadius:"6px",padding:"10px 12px",border:"1px solid #1e2438"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"6px"}}>
+            <span style={{fontSize:"9px",color:"#5a6478",letterSpacing:"1px",textTransform:"uppercase"}}>Análise</span>
+            <span style={{fontSize:"9px",fontWeight:"700",padding:"2px 8px",borderRadius:"20px",
+              background:data.summary.verdictColor+"22",color:data.summary.verdictColor,
+              border:`1px solid ${data.summary.verdictColor}44`}}>
+              {data.summary.verdict}
+            </span>
+          </div>
+          <p style={{fontSize:"10px",color:"#9ca3af",lineHeight:"1.55",margin:0}}>
+            {data.summary.text}
+          </p>
+        </div>
+      )}
+
+      {data.fetchedAt && (
+        <div style={{marginTop:"8px",fontSize:"8px",color:"#5a6478",textAlign:"right",letterSpacing:"0.3px"}}>
+          Actualizado: {data.fetchedAt}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── ScreenerView ────────────────────────────────────────────────────────── */
+function ScreenerView() {
+  const allTickers = Object.keys(SCREENER_DATA);
+  const [hidden, setHidden] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("screener_hidden") || "[]"); } catch { return []; }
+  });
+  const [deleted, setDeleted] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("screener_deleted") || "[]"); } catch { return []; }
+  });
+
+  const hide = t => setHidden(h => {
+    const next = [...h, t];
+    localStorage.setItem("screener_hidden", JSON.stringify(next));
+    return next;
+  });
+  const del = t => {
+    setDeleted(d => {
+      const next = [...d, t];
+      localStorage.setItem("screener_deleted", JSON.stringify(next));
+      return next;
+    });
+    setHidden(h => {
+      const next = h.filter(x => x !== t);
+      localStorage.setItem("screener_hidden", JSON.stringify(next));
+      return next;
+    });
+  };
+  const restoreHidden = () => {
+    setHidden([]);
+    localStorage.removeItem("screener_hidden");
+  };
+
+  const visible = allTickers.filter(t => !hidden.includes(t) && !deleted.includes(t));
+
+  return (
+    <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#131722"}}>
+      {/* Header */}
+      <div className="no-print" style={{padding:"12px 20px",borderBottom:"1px solid #2a3042",
+        background:"#1a1f2e",display:"flex",alignItems:"center",gap:"14px",flexWrap:"wrap"}}>
+        <div>
+          <div style={{fontSize:"15px",fontWeight:"700",color:"#e0e3eb",letterSpacing:"-0.3px"}}>Stock Screener</div>
+          <div style={{fontSize:"9px",color:"#5a6478",marginTop:"1px"}}>
+            {FETCHED_AT !== "n/a" ? `Dados: ${FETCHED_AT}` : "Sem dados — adiciona tickers abaixo"}
+          </div>
+        </div>
+        <div style={{flex:1}}/>
+        <ScreenerFetchBar/>
+      </div>
+
+      {/* Toolbar */}
+      {(hidden.length > 0 || visible.length > 0) && (
+        <div className="no-print" style={{padding:"8px 16px",borderBottom:"1px solid #1e2438",
+          background:"#1a1f2e",display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}}>
+          <span style={{fontSize:"9px",color:"#5a6478"}}>{visible.length} stock{visible.length!==1?"s":""} visíveis</span>
+          <div style={{flex:1}}/>
+          {hidden.length > 0 && (
+            <button onClick={restoreHidden}
+              style={{fontSize:"9px",padding:"5px 12px",borderRadius:"5px",cursor:"pointer",
+                background:"#1e2438",border:"1px solid #2a3042",color:"#6b7280"}}>
+              Mostrar ocultas ({hidden.length})
+            </button>
+          )}
+          {visible.length > 0 && (
+            <button onClick={() => openPDF(visible.map(t => ({ticker:t, data:SCREENER_DATA[t], chartPeriod:"6M"})))}
+              style={{fontSize:"9px",padding:"5px 12px",borderRadius:"5px",cursor:"pointer",
+                background:"#1e2438",border:"1px solid #5a6478",color:"#787b86",
+                display:"flex",alignItems:"center",gap:"5px",transition:"all 0.12s"}}
+              onMouseEnter={e=>{e.currentTarget.style.color="#5b8af5";e.currentTarget.style.borderColor="#5b8af544";}}
+              onMouseLeave={e=>{e.currentTarget.style.color="#787b86";e.currentTarget.style.borderColor="#5a6478";}}>
+              ⎙ Exportar ({visible.length})
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Grid */}
+      <div style={{flex:1,overflow:"auto",padding:"14px 16px"}}>
+        {allTickers.length === 0 ? (
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
+            height:"60vh",gap:"14px",color:"#5a6478",textAlign:"center"}}>
+            <div style={{fontSize:"36px"}}>📊</div>
+            <div style={{fontSize:"13px",fontWeight:"600",color:"#787b86"}}>Nenhum dado ainda</div>
+            <div style={{fontSize:"11px",color:"#5a6478",maxWidth:"340px",lineHeight:1.6}}>
+              Usa o campo acima para adicionar tickers. O workflow do GitHub Actions vai buscar os dados e publicar a página actualizada.
+            </div>
+          </div>
+        ) : visible.length === 0 ? (
+          <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"200px",
+            color:"#5a6478",textAlign:"center",fontSize:"12px"}}>
+            Nenhuma stock visível.{hidden.length > 0 && (
+              <a onClick={restoreHidden} style={{color:"#2962ff",cursor:"pointer",marginLeft:"4px"}}>
+                Mostrar ocultas?
+              </a>
+            )}
+          </div>
+        ) : (
+          <div className="screener-grid" style={{display:"grid",
+            gridTemplateColumns:"repeat(auto-fill,minmax(520px,1fr))",gap:"12px"}}>
+            {visible.map(t => (
+              <ScreenerCard key={t} ticker={t} data={SCREENER_DATA[t]} onRemove={hide} onDelete={del}/>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="no-print" style={{padding:"8px 20px",borderTop:"1px solid #1e2438",
+        fontSize:"8px",color:"#3a4055",display:"flex",justifyContent:"space-between",flexWrap:"wrap",gap:"4px"}}>
+        <span>ctrovisco-blip.github.io/stock-screener</span>
+        <span>Build: {BUILD_UPDATED}</span>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<ScreenerView/>);
+</script>
+</body>
+</html>

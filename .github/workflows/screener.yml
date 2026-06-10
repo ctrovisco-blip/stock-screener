@@ -1,0 +1,65 @@
+name: Stock Screener
+
+on:
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: 'Tickers (separados por vírgula, ex: AAPL,MSFT,NVDA)'
+        required: true
+        type: string
+      mode:
+        description: 'Modo: adicionar ao existente ou substituir tudo'
+        required: false
+        default: 'add'
+        type: choice
+        options:
+          - add
+          - replace
+
+concurrency:
+  group: screener
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  screener:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Fetch screener fundamentals
+        env:
+          TICKERS:     ${{ github.event.inputs.tickers }}
+          MODE:        ${{ github.event.inputs.mode }}
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+        run: python fetch_screener.py
+
+      - name: Build HTML
+        run: python build_html.py
+
+      - name: Commit & push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html data/screener.json
+          if git diff --staged --quiet; then
+            echo "Sem alterações."
+            exit 0
+          fi
+          git commit -m "feat: screener — ${{ github.event.inputs.tickers }} [skip ci]"
+          git pull --rebase origin main
+          git push origin main
