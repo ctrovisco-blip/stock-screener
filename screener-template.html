@@ -487,7 +487,7 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
   };
 
   return (
-    <div className="screener-card" style={{background:"#1a1f2e",borderRadius:"8px",border:"1px solid #2a3042",padding:"12px"}}>
+    <div className="screener-card" style={{background:"#1a1f2e",borderRadius:"8px",border:"1px solid #2a3042",padding:"12px",minWidth:0,overflow:"hidden"}}>
       <div style={{borderLeft:"3px solid #2962ff",paddingLeft:"10px",marginBottom:"12px",
         display:"flex",alignItems:"flex-start",gap:"8px"}}>
         <LogoImg ticker={ticker} sector={data.sector} flag={data.flag} size={24}/>
@@ -756,7 +756,7 @@ function ScreenerView() {
           </div>
         ) : (
           <div className="screener-grid" style={{display:"grid",
-            gridTemplateColumns:"repeat(auto-fill,minmax(520px,1fr))",gap:"12px"}}>
+            gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,480px),1fr))",gap:"12px"}}>
             {visible.map(t => (
               <ScreenerCard key={t} ticker={t} data={SCREENER_DATA[t]} onRemove={hide} onDelete={del}/>
             ))}
