@@ -96,7 +96,169 @@ def find_row(df, *keywords):
     return None
 
 
-FMP_API_KEY = os.environ.get("FMP_API_KEY", "")
+FMP_API_KEY    = os.environ.get("FMP_API_KEY", "")
+FISCAL_API_KEY = os.environ.get("FISCAL_API_KEY", "")
+
+_YF_TO_FISCAL = {
+    "NMS": "NASDAQ", "NMQ": "NASDAQ", "NGM": "NASDAQ", "NIM": "NASDAQ",
+    "NYQ": "NYSE",   "NYS": "NYSE",
+    "PCX": "NYSE",   "ASE": "NYSE",
+    "LSE": "LSE",    "FRA": "XETRA",  "XETRA": "XETRA",
+    "PAR": "EURONEXT", "AMS": "EURONEXT",
+    "TSX": "TSX",    "CVE": "TSX",
+}
+
+def _fiscal_get(path):
+    if not FISCAL_API_KEY:
+        return None
+    sep = "&" if "?" in path else "?"
+    url = f"https://api.fiscal.ai/{path}{sep}apiKey={FISCAL_API_KEY}"
+    try:
+        with urllib.request.urlopen(url, timeout=12) as r:
+            data = json.loads(r.read().decode())
+            return data if data else None
+    except Exception as e:
+        print(f"  Fiscal.ai error ({path[:50]}): {e}")
+        return None
+
+def _fiscal_company_key(ticker, yf_exchange):
+    exchange = _YF_TO_FISCAL.get(yf_exchange or "", "")
+    candidates = []
+    if exchange:
+        candidates.append(f"{exchange}_{ticker}")
+    for ex in ("NASDAQ", "NYSE"):
+        key = f"{ex}_{ticker}"
+        if key not in candidates:
+            candidates.append(key)
+    return candidates
+
+def _fiscal_find(items, *keywords):
+    for row in items:
+        label = str(row.get("label", "") or row.get("name", "")).lower()
+        if all(kw.lower() in label for kw in keywords):
+            return row
+    return None
+
+def _fiscal_latest_val(row):
+    if not row:
+        return None
+    for key in ("annualValues", "values", "data"):
+        vals = row.get(key)
+        if vals and isinstance(vals, list):
+            for v in vals:
+                val = v.get("value") if isinstance(v, dict) else v
+                try:
+                    f = float(val)
+                    if f == f:
+                        return f
+                except (TypeError, ValueError):
+                    continue
+    return None
+
+def _fiscal_unwrap(resp):
+    if not resp:
+        return []
+    rows = resp if isinstance(resp, list) else resp.get("data", resp.get("items", []))
+    if rows and isinstance(rows[0], dict) and "items" in rows[0]:
+        rows = rows[0].get("items", [])
+    return rows
+
+def fetch_fiscal_ai(ticker, yf_exchange, entry):
+    """Fetch missing fields from Fiscal.ai as fallback (only fills None values)."""
+    if not FISCAL_API_KEY:
+        return {}
+
+    missing = {k for k, v in entry.items() if v is None}
+    needs_income  = missing & {"grossMargin", "operatingMargin", "netMargin", "revenueGrowth"}
+    needs_balance = missing & {"debtToEquity", "currentRatio"}
+    needs_cf      = missing & {"fcfYield"}
+
+    if not (needs_income or needs_balance or needs_cf):
+        return {}
+
+    company_key = None
+    inc_resp = None
+    for ck in _fiscal_company_key(ticker, yf_exchange):
+        resp = _fiscal_get(f"v1/company/financials/income-statement/standardized?companyKey={ck}&periodType=annual&limit=3")
+        if resp:
+            company_key = ck
+            inc_resp = resp
+            break
+
+    if not company_key:
+        print(f"  Fiscal.ai: no data for {ticker}")
+        return {}
+
+    print(f"  Fiscal.ai: companyKey={company_key}")
+    out = {}
+
+    if needs_income and inc_resp:
+        items = _fiscal_unwrap(inc_resp)
+        rev_row = _fiscal_find(items, "revenue")
+        ni_row  = _fiscal_find(items, "net", "income")
+        gp_row  = _fiscal_find(items, "gross", "profit")
+        oi_row  = _fiscal_find(items, "operating", "income")
+        rev = _fiscal_latest_val(rev_row)
+        ni  = _fiscal_latest_val(ni_row)
+        gp  = _fiscal_latest_val(gp_row)
+        oi  = _fiscal_latest_val(oi_row)
+        if rev and rev > 0:
+            if entry.get("netMargin") is None and ni is not None:
+                out["netMargin"] = sr(ni / rev * 100, 2)
+            if entry.get("grossMargin") is None and gp is not None:
+                out["grossMargin"] = sr(gp / rev * 100, 2)
+            if entry.get("operatingMargin") is None and oi is not None:
+                out["operatingMargin"] = sr(oi / rev * 100, 2)
+        if entry.get("revenueGrowth") is None and rev_row:
+            rev_vals = []
+            for key in ("annualValues", "values", "data"):
+                vals = rev_row.get(key)
+                if vals and isinstance(vals, list):
+                    for v in vals[:2]:
+                        try: rev_vals.append(float(v.get("value") if isinstance(v, dict) else v))
+                        except: pass
+                    break
+            if len(rev_vals) >= 2 and rev_vals[1] > 0:
+                out["revenueGrowth"] = sr((rev_vals[0] / rev_vals[1] - 1) * 100, 2)
+
+    if needs_balance:
+        bs_resp = _fiscal_get(f"v1/company/financials/balance-sheet/standardized?companyKey={company_key}&periodType=annual&limit=1")
+        if bs_resp:
+            items = _fiscal_unwrap(bs_resp)
+            td_row = _fiscal_find(items, "total", "debt") or _fiscal_find(items, "long", "term", "debt")
+            eq_row = _fiscal_find(items, "total", "equity") or _fiscal_find(items, "stockholder")
+            ca_row = _fiscal_find(items, "current", "assets")
+            cl_row = _fiscal_find(items, "current", "liabilities")
+            td = _fiscal_latest_val(td_row)
+            eq = _fiscal_latest_val(eq_row)
+            ca = _fiscal_latest_val(ca_row)
+            cl = _fiscal_latest_val(cl_row)
+            if entry.get("debtToEquity") is None and td is not None and eq and eq > 0:
+                out["debtToEquity"] = sr(td / eq * 100, 2)
+            if entry.get("currentRatio") is None and ca is not None and cl and cl > 0:
+                out["currentRatio"] = sr(ca / cl, 2)
+
+    if needs_cf:
+        cf_resp = _fiscal_get(f"v1/company/financials/cash-flow/standardized?companyKey={company_key}&periodType=annual&limit=1")
+        if cf_resp:
+            items = _fiscal_unwrap(cf_resp)
+            opcf_row  = _fiscal_find(items, "operating")
+            capex_row = _fiscal_find(items, "capital", "expenditure") or _fiscal_find(items, "capex")
+            opcf  = _fiscal_latest_val(opcf_row)
+            capex = _fiscal_latest_val(capex_row)
+            mc_str = str(entry.get("marketCap") or "")
+            if entry.get("fcfYield") is None and opcf is not None and capex is not None and mc_str:
+                try:
+                    mult = {"T": 1e12, "B": 1e9, "M": 1e6}.get(mc_str[-1], 1)
+                    mc = float(mc_str[:-1]) * mult if mc_str[-1] in "TBM" else float(mc_str)
+                    if mc > 0:
+                        out["fcfYield"] = sr((opcf + capex) / mc * 100, 2)
+                except: pass
+
+    if out:
+        print(f"  Fiscal.ai filled: {list(out.keys())}")
+    return out
+
 
 def fmp_get(path):
     if not FMP_API_KEY:
@@ -417,6 +579,9 @@ for ticker in tickers:
         if fmp_data:
             entry.update(fmp_data)
             print(f"  FMP: {list(fmp_data.keys())}")
+        fiscal_data = fetch_fiscal_ai(ticker, info.get("exchange", ""), entry)
+        if fiscal_data:
+            entry.update(fiscal_data)
         entry["summary"] = generate_summary(entry)
 
         results[ticker] = entry

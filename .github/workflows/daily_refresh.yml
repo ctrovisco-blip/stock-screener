@@ -55,9 +55,10 @@ jobs:
       - name: Fetch screener fundamentals
         if: steps.tickers.outputs.tickers != ''
         env:
-          TICKERS:     ${{ steps.tickers.outputs.tickers }}
-          MODE:        replace
-          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          TICKERS:        ${{ steps.tickers.outputs.tickers }}
+          MODE:           replace
+          FMP_API_KEY:    ${{ secrets.FMP_API_KEY }}
+          FISCAL_API_KEY: ${{ secrets.FISCAL_API_KEY }}
         run: python fetch_screener.py
 
       - name: Build HTML
