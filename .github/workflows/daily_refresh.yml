@@ -72,6 +72,6 @@ jobs:
             echo "Sem alterações."
             exit 0
           fi
-          git commit -m "chore: daily refresh [skip ci]"
+          git commit -m "chore: daily refresh"
           git pull --rebase origin main
           git push origin main

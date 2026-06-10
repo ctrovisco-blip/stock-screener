@@ -60,6 +60,6 @@ jobs:
             echo "Sem alterações."
             exit 0
           fi
-          git commit -m "feat: screener — ${{ github.event.inputs.tickers }} [skip ci]"
+          git commit -m "feat: screener — ${{ github.event.inputs.tickers }}"
           git pull --rebase origin main
           git push origin main
