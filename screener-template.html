@@ -39,6 +39,39 @@ const FETCHED_AT    = "__FETCHED_AT__";
 
 const GH_REPO               = "ctrovisco-blip/stock-screener";
 const GH_SCREENER_WORKFLOW  = "screener.yml";
+
+/* Auto-refresh: poll every 15s for up to 3min after dispatching workflow */
+(function() {
+  const KEY_UNTIL       = "screener_poll_until";
+  const KEY_KNOWN_BUILD = "screener_poll_known_build";
+
+  function startPolling() {
+    localStorage.setItem(KEY_UNTIL, Date.now() + 3 * 60 * 1000);
+    localStorage.setItem(KEY_KNOWN_BUILD, BUILD_UPDATED);
+    scheduleCheck();
+  }
+
+  function scheduleCheck() {
+    if (Date.now() >= parseInt(localStorage.getItem(KEY_UNTIL) || "0")) return;
+    setTimeout(check, 15000);
+  }
+
+  async function check() {
+    if (Date.now() >= parseInt(localStorage.getItem(KEY_UNTIL) || "0")) return;
+    try {
+      const res  = await fetch(location.href, { cache: "no-store" });
+      const html = await res.text();
+      const m    = html.match(/const BUILD_UPDATED = "([^"]+)"/);
+      if (m && m[1] !== BUILD_UPDATED) { location.reload(); return; }
+    } catch(_) {}
+    scheduleCheck();
+  }
+
+  /* Resume if page was reloaded while still within the 3min window */
+  if (Date.now() < parseInt(localStorage.getItem(KEY_UNTIL) || "0")) scheduleCheck();
+
+  window.__startScreenerPolling = startPolling;
+})();
 </script>
 
 <script type="text/babel">
@@ -201,6 +234,7 @@ function ScreenerFetchBar() {
       if (res.status === 204) {
         setStatus("ok");
         setTimeout(() => setStatus("idle"), 10000);
+        if (window.__startScreenerPolling) window.__startScreenerPolling();
       } else {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message || `HTTP ${res.status}`);
