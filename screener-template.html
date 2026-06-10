@@ -412,7 +412,7 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
             ))}
           </div>
         </div>
-        <svg width={W} height={H} style={{width:"100%",display:"block",borderRadius:"4px"}}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block",borderRadius:"4px"}}>
           <defs>
             <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={cc} stopOpacity="0.25"/>
