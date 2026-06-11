@@ -490,6 +490,109 @@ def get_history(t):
     return out
 
 
+def get_metric_history(t):
+    """Annual history (up to ~5y) per metric, for the indicator detail modal."""
+    by_year = {}
+
+    def put(year, key, val):
+        if val is not None:
+            by_year.setdefault(year, {})[key] = val
+
+    try:
+        fin = t.financials
+        if fin is not None and not fin.empty:
+            rev_row = find_row(fin, "total", "revenue") or find_row(fin, "revenue")
+            gp_row  = find_row(fin, "gross profit")
+            oi_row  = find_row(fin, "operating income")
+            ni_row  = find_row(fin, "net income", "common") or find_row(fin, "net income")
+            eps_row = find_row(fin, "diluted eps") or find_row(fin, "basic eps")
+            for c in fin.columns:
+                y = c.year
+                rv = safe_float(fin, rev_row, c) if rev_row else None
+                if rv and rv > 0:
+                    put(y, "revenue", round(rv / 1e9, 2))
+                    gp = safe_float(fin, gp_row, c) if gp_row else None
+                    oi = safe_float(fin, oi_row, c) if oi_row else None
+                    ni = safe_float(fin, ni_row, c) if ni_row else None
+                    if gp is not None: put(y, "grossMargin", round(gp / rv * 100, 1))
+                    if oi is not None: put(y, "operatingMargin", round(oi / rv * 100, 1))
+                    if ni is not None:
+                        put(y, "netMargin", round(ni / rv * 100, 1))
+                        put(y, "netIncome", round(ni / 1e9, 2))
+                eps = safe_float(fin, eps_row, c) if eps_row else None
+                if eps is not None: put(y, "eps", round(eps, 2))
+    except Exception as e:
+        print(f"  metricHistory financials error: {e}")
+
+    try:
+        bs = t.balance_sheet
+        if bs is not None and not bs.empty:
+            td_row = find_row(bs, "total debt")
+            eq_row = find_row(bs, "stockholders equity") or find_row(bs, "total equity")
+            ta_row = find_row(bs, "total assets")
+            ca_row = find_row(bs, "current assets")
+            cl_row = find_row(bs, "current liabilities")
+            sh_row = find_row(bs, "ordinary shares number") or find_row(bs, "share issued")
+            for c in bs.columns:
+                y  = c.year
+                td = safe_float(bs, td_row, c) if td_row else None
+                eq = safe_float(bs, eq_row, c) if eq_row else None
+                ta = safe_float(bs, ta_row, c) if ta_row else None
+                ca = safe_float(bs, ca_row, c) if ca_row else None
+                cl = safe_float(bs, cl_row, c) if cl_row else None
+                sh = safe_float(bs, sh_row, c) if sh_row else None
+                if td is not None: put(y, "totalDebt", round(td / 1e9, 2))
+                if td is not None and eq and eq > 0: put(y, "debtToEquity", round(td / eq * 100, 1))
+                if ca is not None and cl and cl > 0: put(y, "currentRatio", round(ca / cl, 2))
+                if sh and sh > 0: put(y, "sharesOutstanding", round(sh / 1e9, 3))
+                ni = by_year.get(y, {}).get("netIncome")
+                if ni is not None and eq and eq > 0: put(y, "roe", round(ni * 1e9 / eq * 100, 1))
+                if ni is not None and ta and ta > 0: put(y, "roa", round(ni * 1e9 / ta * 100, 1))
+    except Exception as e:
+        print(f"  metricHistory balance-sheet error: {e}")
+
+    try:
+        cf = t.cashflow
+        if cf is not None and not cf.empty:
+            opcf_row  = find_row(cf, "operating", "cash") or find_row(cf, "operating activities")
+            capex_row = find_row(cf, "capital", "expenditure")
+            if opcf_row and capex_row:
+                for c in cf.columns:
+                    opcf  = safe_float(cf, opcf_row, c)
+                    capex = safe_float(cf, capex_row, c)
+                    if opcf is not None and capex is not None:
+                        put(c.year, "fcf", round((opcf + capex) / 1e9, 2))
+    except Exception as e:
+        print(f"  metricHistory cashflow error: {e}")
+
+    try:
+        divs = t.dividends
+        if divs is not None and len(divs) > 0:
+            annual = {}
+            for dt, amt in divs.items():
+                annual[dt.year] = annual.get(dt.year, 0) + float(amt)
+            for y in by_year:
+                if annual.get(y):
+                    put(y, "dps", round(annual[y], 2))
+    except Exception as e:
+        print(f"  metricHistory dividends error: {e}")
+
+    years = sorted(by_year)[-6:]
+    if len(years) < 2:
+        return {}
+    metrics = {}
+    keys = set()
+    for y in years:
+        keys.update(by_year[y])
+    for k in keys:
+        arr = [by_year[y].get(k) for y in years]
+        if sum(v is not None for v in arr) >= 2:
+            metrics[k] = arr
+    if not metrics:
+        return {}
+    return {"metricHistory": {"years": years, "metrics": metrics}}
+
+
 tickers_env = os.environ.get("TICKERS", "").strip()
 mode = os.environ.get("MODE", "add").strip().lower()
 
@@ -574,6 +677,7 @@ for ticker in tickers:
         }
 
         entry.update(get_history(t))
+        entry.update(get_metric_history(t))
         entry.update(get_price_history(t))
         fmp_data = fetch_fmp(ticker)
         if fmp_data:

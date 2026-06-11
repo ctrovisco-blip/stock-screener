@@ -16,6 +16,17 @@
   ::-webkit-scrollbar-track { background: #131722; }
   ::-webkit-scrollbar-thumb { background: #2a3042; border-radius: 3px; }
   input, button, select { font-family: inherit; }
+  [data-tip] { position: relative; }
+  [data-tip]:hover::after {
+    content: attr(data-tip);
+    position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%);
+    background: #0d1117; color: #c8ccd4; border: 1px solid #2a3042; border-radius: 6px;
+    padding: 7px 10px; font-size: 10px; line-height: 1.5; width: 210px;
+    white-space: normal; text-align: left; text-transform: none; letter-spacing: 0;
+    z-index: 60; box-shadow: 0 4px 14px rgba(0,0,0,0.55); pointer-events: none;
+  }
+  .ci-click { cursor: pointer; transition: border-color 0.12s; }
+  .ci-click:hover { border-color: #2962ff88 !important; }
   @media print {
     @page { size: A4; margin: 12mm; }
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -346,6 +357,57 @@ function ScreenerFetchBar() {
   );
 }
 
+/* ── Tooltips dos indicadores ───────────────────────────────────────────── */
+const TIPS = {
+  "Market Cap":       "Valor total de mercado da empresa: preço da ação × número de ações em circulação.",
+  "P/E Ratio":        "Preço / Lucro por ação. Quantos anos de lucros atuais pagas pelo preço de hoje — quanto mais baixo, mais barata a ação.",
+  "Price/Book":       "Preço / Valor contabilístico por ação. Abaixo de 1 pode indicar subavaliação face aos ativos líquidos.",
+  "Price/Sales":      "Preço / Receita por ação. Útil para avaliar empresas ainda sem lucros.",
+  "EV/EBITDA":        "Valor da empresa (incluindo dívida) / EBITDA. Permite comparar avaliações independentemente da estrutura de capital.",
+  "Beta":             "Volatilidade face ao mercado. 1 = move-se como o mercado; >1 mais volátil; <1 mais defensiva.",
+  "Debt/Equity":      "Dívida total / Capitais próprios. Acima de 100% a empresa tem mais dívida do que capital próprio.",
+  "Curr. Ratio":      "Ativos correntes / Passivos correntes. Acima de 1 indica capacidade de pagar as obrigações de curto prazo.",
+  "Total Debt":       "Dívida total da empresa (curto + longo prazo).",
+  "Preço Alvo":       "Preço-alvo médio dos analistas e potencial de valorização face ao preço atual.",
+  "Gross Margin":     "(Receita − custo dos produtos vendidos) / Receita. Mede o poder de preço do negócio.",
+  "Op. Margin":       "Lucro operacional / Receita. Eficiência do negócio principal, antes de juros e impostos.",
+  "Net Margin":       "Lucro líquido / Receita. Quanto de cada dólar/euro de vendas se converte em lucro final.",
+  "ROE":              "Retorno sobre capitais próprios: lucro líquido / capital dos acionistas. Acima de 15–20% é excelente.",
+  "ROA":              "Retorno sobre ativos: mede a eficiência com que os ativos geram lucro.",
+  "ROIC":             "Retorno sobre o capital investido (próprio + dívida). Acima do custo de capital, a empresa cria valor.",
+  "FCF Yield":        "Free cash flow / Market cap. Cash livre gerado por ano face ao preço pago pela empresa.",
+  "Rev. Growth":      "Crescimento da receita face ao ano fiscal anterior.",
+  "Nº Acções":        "Número de ações em circulação. A diminuir ao longo dos anos = recompras (bom para o acionista).",
+  "EPS":              "Lucro por ação dos últimos 12 meses.",
+  "EPS Growth":       "Crescimento do lucro por ação face ao período homólogo.",
+  "Dividend Yield":   "Dividendo anual / Preço da ação.",
+  "Buyback Yield":    "Valor gasto em recompras de ações / Market cap.",
+  "Shareholder Yield":"Dividend yield + buyback yield: retorno total devolvido ao acionista.",
+  "Payout Ratio":     "Percentagem dos lucros paga em dividendos. Abaixo de ~60–80% é geralmente sustentável.",
+  "Insiders":         "Percentagem da empresa detida por gestores e fundadores — interesses alinhados com os acionistas.",
+  "Institucional":    "Percentagem detida por fundos e investidores institucionais.",
+  "Short Interest":   "Percentagem do free float vendido a descoberto. Valores altos = mercado pessimista (ou risco de short squeeze).",
+  "Analistas":        "Recomendações dos analistas: Buy / Hold / Sell.",
+};
+
+/* ── Metadados das métricas com histórico anual ─────────────────────────── */
+const METRIC_META = {
+  revenue:           {title:"Receita",             unit:"B"},
+  grossMargin:       {title:"Margem Bruta",        unit:"%"},
+  operatingMargin:   {title:"Margem Operacional",  unit:"%"},
+  netMargin:         {title:"Margem Líquida",      unit:"%"},
+  netIncome:         {title:"Resultado Líquido",   unit:"B"},
+  eps:               {title:"EPS (diluído)",       unit:"cur"},
+  fcf:               {title:"Free Cash Flow",      unit:"B"},
+  totalDebt:         {title:"Dívida Total",        unit:"B"},
+  debtToEquity:      {title:"Debt/Equity",         unit:"%"},
+  currentRatio:      {title:"Current Ratio",       unit:"x"},
+  roe:               {title:"ROE",                 unit:"%"},
+  roa:               {title:"ROA",                 unit:"%"},
+  sharesOutstanding: {title:"Nº de Ações",         unit:"B"},
+  dps:               {title:"Dividendo por Ação",  unit:"cur"},
+};
+
 /* ── ScreenerCard ────────────────────────────────────────────────────────── */
 function ScreenerCard({ ticker, data, onRemove, onDelete }) {
   const col = SECTOR_COLORS[data.sector] || "#5a6478";
@@ -448,15 +510,126 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
     );
   };
 
-  const CardItem = ({label, value, color, history}) => (
-    <div style={{background:"#131722",borderRadius:"5px",padding:"7px 9px",border:"1px solid #1e2438"}}>
-      <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"4px",letterSpacing:"0.5px",textTransform:"uppercase"}}>{label}</div>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:"4px"}}>
-        <div style={{fontSize:"11px",color:color||"#c8ccd4",fontWeight:"600",fontVariantNumeric:"tabular-nums"}}>{value}</div>
-        {history && history.length >= 2 && <MiniSparkline values={history} color={color||"#5a6478"}/>}
+  const [modalMetric, setModalMetric] = useState(null);
+
+  const metricValues = m => {
+    const mh = data.metricHistory;
+    if (!m || !mh || !mh.metrics || !mh.metrics[m]) return null;
+    const vals = mh.metrics[m];
+    return vals.filter(v => v != null).length >= 2 ? vals : null;
+  };
+
+  const CardItem = ({label, value, color, history, metric}) => {
+    const tip = TIPS[label] || (label.startsWith("Analistas") ? TIPS["Analistas"] : undefined);
+    const clickable = !!metricValues(metric);
+    return (
+      <div data-tip={tip} className={clickable ? "ci-click" : undefined}
+        onClick={clickable ? () => setModalMetric(metric) : undefined}
+        style={{background:"#131722",borderRadius:"5px",padding:"7px 9px",border:"1px solid #1e2438"}}>
+        <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"4px",letterSpacing:"0.5px",textTransform:"uppercase"}}>
+          {label}{clickable && <span style={{color:"#3d4663",marginLeft:"4px"}}>›</span>}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:"4px"}}>
+          <div style={{fontSize:"11px",color:color||"#c8ccd4",fontWeight:"600",fontVariantNumeric:"tabular-nums"}}>{value}</div>
+          {history && history.length >= 2 && <MiniSparkline values={history} color={color||"#5a6478"}/>}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
+
+  const MetricModal = () => {
+    if (!modalMetric) return null;
+    const mh   = data.metricHistory;
+    const meta = METRIC_META[modalMetric] || {title:modalMetric, unit:""};
+    const vals = mh.metrics[modalMetric];
+    const pairs = mh.years.map((y,i) => ({y, v:vals[i]})).filter(p => p.v != null);
+    if (pairs.length < 2) return null;
+
+    const fmtV = v =>
+      meta.unit === "%"   ? `${v.toFixed(1)}%` :
+      meta.unit === "cur" ? `${currencySymbol}${v.toFixed(2)}` :
+      meta.unit === "B"   ? (Math.abs(v) >= 1000 ? `${(v/1000).toFixed(2)}T` : `${v.toFixed(2)}B`) :
+      v.toFixed(2);
+
+    const first = pairs[0].v, last = pairs[pairs.length-1].v;
+    const change = first !== 0 ? (last/first - 1) * 100 : null;
+    const chCol  = change == null ? "#6b7280" : change >= 0 ? "#089981" : "#ef5350";
+
+    const W=460, H=190, padT=22, padB=22, padX=8;
+    const maxV = Math.max(0, ...pairs.map(p=>p.v));
+    const minV = Math.min(0, ...pairs.map(p=>p.v));
+    const range = (maxV - minV) || 1;
+    const plotH = H - padT - padB;
+    const y0 = padT + plotH * (maxV / range);
+    const bw = (W - padX*2) / pairs.length;
+
+    return (
+      <div onClick={() => setModalMetric(null)}
+        style={{position:"fixed",inset:0,background:"rgba(8,10,16,0.75)",zIndex:100,
+          display:"flex",alignItems:"center",justifyContent:"center",padding:"16px"}}>
+        <div onClick={e => e.stopPropagation()}
+          style={{background:"#1a1f2e",border:"1px solid #2a3042",borderRadius:"10px",
+            padding:"16px 18px",width:"100%",maxWidth:"520px",maxHeight:"90vh",overflow:"auto"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:"4px"}}>
+            <div>
+              <div style={{fontSize:"13px",fontWeight:"700",color:"#e8eaf0"}}>{meta.title}</div>
+              <div style={{fontSize:"9px",color:"#5a6478",marginTop:"2px"}}>{ticker} · {data.name} · dados anuais</div>
+            </div>
+            <button onClick={() => setModalMetric(null)}
+              style={{background:"transparent",border:"1px solid #2a3042",color:"#6b7280",
+                cursor:"pointer",fontSize:"12px",padding:"3px 9px",lineHeight:1,borderRadius:"4px"}}>✕</button>
+          </div>
+          {change != null && (
+            <div style={{fontSize:"10px",color:chCol,fontWeight:"700",marginBottom:"8px"}}>
+              {change >= 0 ? "+" : ""}{change.toFixed(1)}% de {pairs[0].y} a {pairs[pairs.length-1].y}
+            </div>
+          )}
+          <svg viewBox={`0 0 ${W} ${H}`} style={{width:"100%",height:"auto",display:"block"}}>
+            <line x1={padX} y1={y0} x2={W-padX} y2={y0} stroke="#2a3042" strokeWidth="1"/>
+            {pairs.map((p,i) => {
+              const h = Math.abs(p.v) / range * plotH;
+              const x = padX + i*bw + bw*0.16;
+              const y = p.v >= 0 ? y0 - h : y0;
+              const bc = p.v >= 0 ? "#2962ff" : "#ef5350";
+              return (
+                <g key={p.y}>
+                  <rect x={x} y={y} width={bw*0.68} height={Math.max(h,1)} rx="3" fill={bc} opacity="0.85"/>
+                  <text x={x + bw*0.34} y={p.v >= 0 ? y - 6 : y + h + 11} textAnchor="middle"
+                    fontSize="9.5" fontWeight="600" fill="#c8ccd4">{fmtV(p.v)}</text>
+                  <text x={x + bw*0.34} y={H-6} textAnchor="middle" fontSize="9.5" fill="#5a6478">{p.y}</text>
+                </g>
+              );
+            })}
+          </svg>
+          <div style={{marginTop:"10px",borderTop:"1px solid #1e2438"}}>
+            {pairs.slice().reverse().map((p,i,arr) => {
+              const prev = arr[i+1];
+              const yoy = prev && prev.v !== 0 ? (p.v/prev.v - 1) * 100 : null;
+              return (
+                <div key={p.y} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"6px 2px",borderBottom:"1px solid #1e2438",fontSize:"10.5px"}}>
+                  <span style={{color:"#6b7280"}}>{p.y}</span>
+                  <span style={{display:"flex",gap:"12px",alignItems:"center"}}>
+                    {yoy != null && (
+                      <span style={{fontSize:"9px",color:yoy>=0?"#089981":"#ef5350"}}>
+                        {yoy>=0?"+":""}{yoy.toFixed(1)}%
+                      </span>
+                    )}
+                    <span style={{color:"#c8ccd4",fontWeight:"600",fontVariantNumeric:"tabular-nums",minWidth:"64px",textAlign:"right"}}>
+                      {fmtV(p.v)}
+                    </span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{fontSize:"8px",color:"#3d4663",marginTop:"8px",textAlign:"right"}}>
+            Anos fiscais · fonte: yfinance
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   const Section = ({title}) => (
     <div style={{fontSize:"9px",color:"#5a6478",letterSpacing:"1.5px",margin:"10px 0 5px 1px",textTransform:"uppercase"}}>{title}</div>
@@ -488,7 +661,7 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
   };
 
   return (
-    <div className="screener-card" style={{background:"#1a1f2e",borderRadius:"8px",border:"1px solid #2a3042",padding:"12px",minWidth:0,overflow:"hidden"}}>
+    <div className="screener-card" style={{background:"#1a1f2e",borderRadius:"8px",border:"1px solid #2a3042",padding:"12px",minWidth:0}}>
       <div style={{borderLeft:"3px solid #2962ff",paddingLeft:"10px",marginBottom:"12px",
         display:"flex",alignItems:"flex-start",gap:"8px"}}>
         <LogoImg ticker={ticker} sector={data.sector} flag={data.flag} size={24}/>
@@ -543,9 +716,9 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
         <CardItem label="Price/Sales" value={fmtNum(data.priceToSales)} color={psCol(data.priceToSales)}/>
         <CardItem label="EV/EBITDA"   value={fmtNum(data.evEbitda)}     color={psCol(data.evEbitda)}/>
         <CardItem label="Beta"        value={fmtNum(data.beta,2)}       color={betaCol(data.beta)}/>
-        <CardItem label="Debt/Equity" value={data.debtToEquity!=null?`${data.debtToEquity.toFixed(0)}%`:"—"} color={deCol(data.debtToEquity)}/>
-        <CardItem label="Curr. Ratio" value={fmtNum(data.currentRatio,2)} color={crCol(data.currentRatio)}/>
-        <CardItem label="Total Debt"  value={fmtStr(data.totalDebt)}    color={data.totalDebt?"#F0883E":"#6b7280"}/>
+        <CardItem label="Debt/Equity" value={data.debtToEquity!=null?`${data.debtToEquity.toFixed(0)}%`:"—"} color={deCol(data.debtToEquity)} metric="debtToEquity"/>
+        <CardItem label="Curr. Ratio" value={fmtNum(data.currentRatio,2)} color={crCol(data.currentRatio)} metric="currentRatio"/>
+        <CardItem label="Total Debt"  value={fmtStr(data.totalDebt)}    color={data.totalDebt?"#F0883E":"#6b7280"} metric="totalDebt"/>
         {(() => {
           const upside = (data.targetPrice && data.curPrice) ? ((data.targetPrice/data.curPrice-1)*100) : null;
           const label = data.targetPrice != null
@@ -557,32 +730,32 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
 
       <Section title="Rentabilidade"/>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px"}}>
-        <CardItem label="Gross Margin" value={fmtPct(data.grossMargin)}     color={marginCol(data.grossMargin)} history={data.grossMarginHistory}/>
-        <CardItem label="Op. Margin"   value={fmtPct(data.operatingMargin)} color={opMarCol(data.operatingMargin)}/>
-        <CardItem label="Net Margin"   value={fmtPct(data.netMargin)}       color={marginCol(data.netMargin)}   history={data.netMarginHistory}/>
+        <CardItem label="Gross Margin" value={fmtPct(data.grossMargin)}     color={marginCol(data.grossMargin)} history={data.grossMarginHistory} metric="grossMargin"/>
+        <CardItem label="Op. Margin"   value={fmtPct(data.operatingMargin)} color={opMarCol(data.operatingMargin)} metric="operatingMargin"/>
+        <CardItem label="Net Margin"   value={fmtPct(data.netMargin)}       color={marginCol(data.netMargin)}   history={data.netMarginHistory} metric="netMargin"/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:"4px",marginTop:"4px"}}>
-        <CardItem label="ROE"       value={fmtPct(data.roe)}    color={roeCol(data.roe)}/>
-        <CardItem label="ROA"       value={fmtPct(data.roa)}    color={roeCol(data.roa)}/>
+        <CardItem label="ROE"       value={fmtPct(data.roe)}    color={roeCol(data.roe)} metric="roe"/>
+        <CardItem label="ROA"       value={fmtPct(data.roa)}    color={roeCol(data.roa)} metric="roa"/>
         <CardItem label="ROIC"      value={fmtPct(data.roic)}   color={roeCol(data.roic)}/>
-        <CardItem label="FCF Yield" value={fmtPct(data.fcfYield)} color={fcfCol(data.fcfYield)} history={data.fcfHistory}/>
+        <CardItem label="FCF Yield" value={fmtPct(data.fcfYield)} color={fcfCol(data.fcfYield)} history={data.fcfHistory} metric="fcf"/>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px",marginTop:"4px"}}>
         <CardItem label="Rev. Growth"
           value={data.revenueGrowth!=null?`${data.revenueGrowth>0?"+":""}${data.revenueGrowth.toFixed(1)}%`:"—"}
-          color={growthCol(data.revenueGrowth)} history={data.revenueHistory}/>
+          color={growthCol(data.revenueGrowth)} history={data.revenueHistory} metric="revenue"/>
       </div>
 
       <Section title="Por Ação"/>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:"4px"}}>
-        <CardItem label="Nº Acções"  value={fmtStr(data.sharesOutstanding)} color="#c8ccd4"/>
-        <CardItem label="EPS"        value={data.eps!=null?`${currencySymbol}${data.eps.toFixed(2)}`:"—"} color="#c8ccd4"/>
-        <CardItem label="EPS Growth" value={data.epsGrowth!=null?`${data.epsGrowth>0?"+":""}${data.epsGrowth.toFixed(1)}%`:"—"} color={epsGrCol(data.epsGrowth)}/>
+        <CardItem label="Nº Acções"  value={fmtStr(data.sharesOutstanding)} color="#c8ccd4" metric="sharesOutstanding"/>
+        <CardItem label="EPS"        value={data.eps!=null?`${currencySymbol}${data.eps.toFixed(2)}`:"—"} color="#c8ccd4" metric="eps"/>
+        <CardItem label="EPS Growth" value={data.epsGrowth!=null?`${data.epsGrowth>0?"+":""}${data.epsGrowth.toFixed(1)}%`:"—"} color={epsGrCol(data.epsGrowth)} metric="eps"/>
       </div>
 
       <Section title="Retorno ao Acionista"/>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px"}}>
-        <CardItem label="Dividend Yield"    value={fmtPct(data.divYield)}         color={yieldCol(data.divYield)}/>
+        <CardItem label="Dividend Yield"    value={fmtPct(data.divYield)}         color={yieldCol(data.divYield)} metric="dps"/>
         <CardItem label="Buyback Yield"     value={fmtPct(data.buybackYield)}     color={yieldCol(data.buybackYield)}/>
         <CardItem label="Shareholder Yield" value={fmtPct(data.shareholderYield)} color={yieldCol(data.shareholderYield)}/>
         <CardItem label="Payout Ratio"      value={fmtPct(data.payoutRatio,1)}    color={payoutCol(data.payoutRatio)}/>
@@ -656,6 +829,7 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
           Actualizado: {data.fetchedAt}
         </div>
       )}
+      <MetricModal/>
     </div>
   );
 }
