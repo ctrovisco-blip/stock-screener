@@ -9,6 +9,7 @@
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: #131722; color: #c8ccd4; font-family: 'Inter', -apple-system, sans-serif; }
@@ -51,6 +52,26 @@ const FETCHED_AT    = "__FETCHED_AT__";
 
 const GH_REPO               = "ctrovisco-blip/stock-screener";
 const GH_SCREENER_WORKFLOW  = "screener.yml";
+
+const SUPABASE_URL = "https://osucqrtdbvpcpfqmjykx.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9zdWNxcnRkYnZwY3BmcW1qeWt4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNTc2MDEsImV4cCI6MjA5NjczMzYwMX0.VTU9HNYPRowT1dSZD3robxloVIXkQAIdHUgE7GMlyiY";
+const _sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const db = {
+  async create(name) {
+    const { data, error } = await _sb.from("profiles").insert({ name, tickers: [] }).select().single();
+    if (error) throw error;
+    return data;
+  },
+  async load(id) {
+    const { data, error } = await _sb.from("profiles").select("*").eq("id", id).single();
+    if (error) throw error;
+    return data;
+  },
+  async setTickers(id, tickers) {
+    const { error } = await _sb.from("profiles").update({ tickers, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) throw error;
+  }
+};
 
 /* Auto-refresh: poll every 15s for up to 3min after dispatching workflow */
 (function() {
@@ -211,8 +232,99 @@ function LogoImg({ ticker, sector, flag, size = 20 }) {
   );
 }
 
+/* ── ProfileSetup ────────────────────────────────────────────────────────── */
+function ProfileSetup({ onProfile }) {
+  const [tab,    setTab]    = useState("new");   // "new" | "code"
+  const [name,   setName]   = useState("");
+  const [code,   setCode]   = useState("");
+  const [status, setStatus] = useState("idle"); // "idle"|"loading"|"err"
+  const [errMsg, setErrMsg] = useState("");
+
+  const err = msg => { setErrMsg(msg); setStatus("err"); };
+
+  const handleCreate = async () => {
+    if (!name.trim()) return;
+    setStatus("loading");
+    try {
+      const p = await db.create(name.trim());
+      localStorage.setItem("screener_profile_id", p.id);
+      onProfile(p);
+    } catch(e) { err(e.message || "Erro ao criar perfil"); }
+  };
+
+  const handleLoad = async () => {
+    if (!code.trim()) return;
+    setStatus("loading");
+    try {
+      const p = await db.load(code.trim());
+      localStorage.setItem("screener_profile_id", p.id);
+      onProfile(p);
+    } catch(e) { err("Código inválido ou perfil não encontrado"); }
+  };
+
+  const tabStyle = active => ({
+    fontSize:"11px", fontWeight:"600", padding:"6px 18px", borderRadius:"5px", cursor:"pointer",
+    background: active ? "#2962ff22" : "transparent",
+    border: active ? "1px solid #2962ff66" : "1px solid transparent",
+    color: active ? "#5b8af5" : "#6b7280", transition:"all 0.12s",
+  });
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#131722",zIndex:200,
+      display:"flex",alignItems:"center",justifyContent:"center",padding:"20px"}}>
+      <div style={{background:"#1a1f2e",border:"1px solid #2a3042",borderRadius:"12px",
+        padding:"28px 28px 24px",width:"100%",maxWidth:"360px",boxShadow:"0 16px 48px #00000088"}}>
+        <div style={{marginBottom:"20px",textAlign:"center"}}>
+          <div style={{fontSize:"22px",marginBottom:"6px"}}>📊</div>
+          <div style={{fontSize:"16px",fontWeight:"700",color:"#e0e3eb"}}>Stock Screener</div>
+          <div style={{fontSize:"10px",color:"#5a6478",marginTop:"4px"}}>Cria um perfil para guardar a tua lista de tickers</div>
+        </div>
+        <div style={{display:"flex",gap:"6px",marginBottom:"18px"}}>
+          <button style={tabStyle(tab==="new")} onClick={() => { setTab("new"); setStatus("idle"); }}>Novo perfil</button>
+          <button style={tabStyle(tab==="code")} onClick={() => { setTab("code"); setStatus("idle"); }}>Tenho um código</button>
+        </div>
+        {tab === "new" ? (
+          <>
+            <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"6px",textTransform:"uppercase",letterSpacing:"0.5px"}}>O teu nome</div>
+            <input value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleCreate()}
+              placeholder="ex: Carlos"
+              style={{width:"100%",background:"#131722",border:"1px solid #2a3042",borderRadius:"6px",
+                padding:"8px 10px",color:"#c8ccd4",fontSize:"12px",outline:"none",marginBottom:"12px"}}/>
+            <button onClick={handleCreate} disabled={!name.trim() || status==="loading"}
+              style={{width:"100%",background:"#2962ff",border:"none",borderRadius:"6px",
+                padding:"9px",color:"#fff",fontSize:"11px",fontWeight:"700",cursor:"pointer",opacity:(!name.trim()||status==="loading")?0.5:1}}>
+              {status==="loading" ? "A criar..." : "Criar perfil"}
+            </button>
+          </>
+        ) : (
+          <>
+            <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"6px",textTransform:"uppercase",letterSpacing:"0.5px"}}>Código do perfil</div>
+            <input value={code} onChange={e => setCode(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && handleLoad()}
+              placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+              style={{width:"100%",background:"#131722",border:"1px solid #2a3042",borderRadius:"6px",
+                padding:"8px 10px",color:"#c8ccd4",fontSize:"11px",fontFamily:"monospace",outline:"none",marginBottom:"12px"}}/>
+            <button onClick={handleLoad} disabled={!code.trim() || status==="loading"}
+              style={{width:"100%",background:"#2962ff",border:"none",borderRadius:"6px",
+                padding:"9px",color:"#fff",fontSize:"11px",fontWeight:"700",cursor:"pointer",opacity:(!code.trim()||status==="loading")?0.5:1}}>
+              {status==="loading" ? "A carregar..." : "Entrar"}
+            </button>
+          </>
+        )}
+        {status === "err" && (
+          <div style={{marginTop:"10px",fontSize:"10px",color:"#ef5350",textAlign:"center"}}>{errMsg}</div>
+        )}
+        <div style={{marginTop:"16px",fontSize:"9px",color:"#3d4663",textAlign:"center",lineHeight:1.6}}>
+          O código do perfil é guardado no teu browser. Podes usá-lo noutros dispositivos.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ── ScreenerFetchBar ────────────────────────────────────────────────────── */
-function ScreenerFetchBar() {
+function ScreenerFetchBar({ onFetched }) {
   const [tickers,  setTickers]  = useState("");
   const [mode,     setMode]     = useState("add");
   const [status,   setStatus]   = useState("idle");
@@ -247,6 +359,7 @@ function ScreenerFetchBar() {
         setStatus("ok");
         setTimeout(() => setStatus("idle"), 10000);
         if (window.__startScreenerPolling) window.__startScreenerPolling();
+        if (onFetched) onFetched(tickers.trim(), mode);
       } else {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.message || `HTTP ${res.status}`);
@@ -837,36 +950,72 @@ function ScreenerCard({ ticker, data, onRemove, onDelete }) {
 /* ── ScreenerView ────────────────────────────────────────────────────────── */
 function ScreenerView() {
   const allTickers = Object.keys(SCREENER_DATA);
-  const [hidden, setHidden] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("screener_hidden") || "[]"); } catch { return []; }
-  });
-  const [deleted, setDeleted] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("screener_deleted") || "[]"); } catch { return []; }
-  });
 
-  const hide = t => setHidden(h => {
-    const next = [...h, t];
-    localStorage.setItem("screener_hidden", JSON.stringify(next));
-    return next;
-  });
-  const del = t => {
-    setDeleted(d => {
-      const next = [...d, t];
-      localStorage.setItem("screener_deleted", JSON.stringify(next));
-      return next;
-    });
-    setHidden(h => {
-      const next = h.filter(x => x !== t);
-      localStorage.setItem("screener_hidden", JSON.stringify(next));
-      return next;
+  const [profile,        setProfile]        = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [showSwitch,     setShowSwitch]     = useState(false);
+  const [codeCopied,     setCodeCopied]     = useState(false);
+  const switchRef = useRef(null);
+
+  /* Load profile on mount */
+  useEffect(() => {
+    const id = localStorage.getItem("screener_profile_id");
+    if (!id) { setProfileLoading(false); return; }
+    db.load(id)
+      .then(p => { setProfile(p); setProfileLoading(false); })
+      .catch(() => { localStorage.removeItem("screener_profile_id"); setProfileLoading(false); });
+  }, []);
+
+  /* Close profile switcher on outside click */
+  useEffect(() => {
+    if (!showSwitch) return;
+    const h = e => { if (switchRef.current && !switchRef.current.contains(e.target)) setShowSwitch(false); };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [showSwitch]);
+
+  /* Update profile tickers in Supabase + local state */
+  const updateTickers = async (tickers) => {
+    const prev = profile;
+    setProfile(p => ({ ...p, tickers }));
+    try { await db.setTickers(prev.id, tickers); }
+    catch(e) { console.error("Supabase update failed:", e); }
+  };
+
+  /* Called when ScreenerFetchBar dispatches workflow successfully */
+  const handleFetched = (tickerStr, mode) => {
+    const newList = tickerStr.split(",").map(t => t.trim().toUpperCase()).filter(Boolean);
+    const current = profile?.tickers || [];
+    const merged  = mode === "replace" ? newList : [...new Set([...current, ...newList])];
+    updateTickers(merged);
+  };
+
+  /* Remove ticker from profile */
+  const handleRemove = t => updateTickers((profile?.tickers || []).filter(x => x !== t));
+
+  /* Add ticker from global pool to profile */
+  const handleAddFromPool = t => updateTickers([...new Set([...(profile?.tickers || []), t])]);
+
+  /* Copy profile UUID to clipboard */
+  const copyCode = () => {
+    navigator.clipboard.writeText(profile.id).then(() => {
+      setCodeCopied(true);
+      setTimeout(() => setCodeCopied(false), 2000);
     });
   };
-  const restoreHidden = () => {
-    setHidden([]);
-    localStorage.removeItem("screener_hidden");
-  };
 
-  const visible = allTickers.filter(t => !hidden.includes(t) && !deleted.includes(t));
+  if (profileLoading) return (
+    <div style={{height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"#5a6478",fontSize:"12px"}}>
+      A carregar perfil...
+    </div>
+  );
+
+  if (!profile) return <ProfileSetup onProfile={p => { setProfile(p); setProfileLoading(false); }}/>;
+
+  const profileTickers = profile.tickers || [];
+  const visible        = profileTickers.filter(t => SCREENER_DATA[t]);
+  const pending        = profileTickers.filter(t => !SCREENER_DATA[t]);
+  const globalPool     = allTickers.filter(t => !profileTickers.includes(t));
 
   return (
     <div style={{minHeight:"100vh",display:"flex",flexDirection:"column",background:"#131722"}}>
@@ -880,61 +1029,138 @@ function ScreenerView() {
           </div>
         </div>
         <div style={{flex:1}}/>
-        <ScreenerFetchBar/>
+        {/* Profile badge */}
+        <div style={{position:"relative"}} ref={switchRef}>
+          <button onClick={() => setShowSwitch(s => !s)}
+            style={{display:"flex",alignItems:"center",gap:"7px",background:"#131722",
+              border:"1px solid #2a3042",borderRadius:"7px",padding:"5px 10px",cursor:"pointer",
+              color:"#c8ccd4",fontSize:"10px",transition:"all 0.12s"}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor="#5a6478"}
+            onMouseLeave={e=>e.currentTarget.style.borderColor="#2a3042"}>
+            <span style={{width:"20px",height:"20px",borderRadius:"50%",background:"#2962ff33",
+              border:"1px solid #2962ff66",display:"inline-flex",alignItems:"center",justifyContent:"center",
+              fontSize:"10px",color:"#5b8af5",fontWeight:"700",flexShrink:0}}>
+              {profile.name[0].toUpperCase()}
+            </span>
+            <span style={{fontWeight:"600"}}>{profile.name}</span>
+            <span style={{color:"#5a6478",fontSize:"9px"}}>▾</span>
+          </button>
+          {showSwitch && (
+            <div style={{position:"absolute",top:"calc(100% + 6px)",right:0,zIndex:200,
+              background:"#1a1f2e",border:"1px solid #2a3042",borderRadius:"9px",
+              padding:"12px",width:"240px",boxShadow:"0 8px 32px #00000099"}}>
+              <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"6px",textTransform:"uppercase",letterSpacing:"0.5px"}}>
+                Código do perfil
+              </div>
+              <div style={{display:"flex",gap:"6px",alignItems:"center",marginBottom:"12px"}}>
+                <code style={{fontSize:"9px",color:"#5b8af5",background:"#131722",border:"1px solid #2a3042",
+                  borderRadius:"4px",padding:"4px 6px",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {profile.id}
+                </code>
+                <button onClick={copyCode}
+                  style={{background:"#2962ff22",border:"1px solid #2962ff44",color:codeCopied?"#22C55E":"#5b8af5",
+                    borderRadius:"4px",padding:"4px 8px",cursor:"pointer",fontSize:"9px",fontWeight:"600",flexShrink:0}}>
+                  {codeCopied ? "✓" : "Copiar"}
+                </button>
+              </div>
+              <div style={{borderTop:"1px solid #1e2438",paddingTop:"10px"}}>
+                <button onClick={() => { setShowSwitch(false); setProfile(null); localStorage.removeItem("screener_profile_id"); }}
+                  style={{width:"100%",background:"transparent",border:"1px solid #2a3042",
+                    borderRadius:"5px",padding:"6px",color:"#6b7280",fontSize:"10px",cursor:"pointer",
+                    transition:"all 0.12s",textAlign:"left"}}
+                  onMouseEnter={e=>{e.currentTarget.style.color="#c8ccd4";e.currentTarget.style.borderColor="#5a6478";}}
+                  onMouseLeave={e=>{e.currentTarget.style.color="#6b7280";e.currentTarget.style.borderColor="#2a3042";}}>
+                  ↩ Mudar perfil
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        <ScreenerFetchBar onFetched={handleFetched}/>
       </div>
 
       {/* Toolbar */}
-      {(hidden.length > 0 || visible.length > 0) && (
+      {visible.length > 0 && (
         <div className="no-print" style={{padding:"8px 16px",borderBottom:"1px solid #1e2438",
           background:"#1a1f2e",display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}}>
-          <span style={{fontSize:"9px",color:"#5a6478"}}>{visible.length} stock{visible.length!==1?"s":""} visíveis</span>
+          <span style={{fontSize:"9px",color:"#5a6478"}}>{visible.length} stock{visible.length!==1?"s":""} na tua lista</span>
           <div style={{flex:1}}/>
-          {hidden.length > 0 && (
-            <button onClick={restoreHidden}
-              style={{fontSize:"9px",padding:"5px 12px",borderRadius:"5px",cursor:"pointer",
-                background:"#1e2438",border:"1px solid #2a3042",color:"#6b7280"}}>
-              Mostrar ocultas ({hidden.length})
-            </button>
-          )}
-          {visible.length > 0 && (
-            <button onClick={() => openPDF(visible.map(t => ({ticker:t, data:SCREENER_DATA[t], chartPeriod:"6M"})))}
-              style={{fontSize:"9px",padding:"5px 12px",borderRadius:"5px",cursor:"pointer",
-                background:"#1e2438",border:"1px solid #5a6478",color:"#787b86",
-                display:"flex",alignItems:"center",gap:"5px",transition:"all 0.12s"}}
-              onMouseEnter={e=>{e.currentTarget.style.color="#5b8af5";e.currentTarget.style.borderColor="#5b8af544";}}
-              onMouseLeave={e=>{e.currentTarget.style.color="#787b86";e.currentTarget.style.borderColor="#5a6478";}}>
-              ⎙ Exportar ({visible.length})
-            </button>
-          )}
+          <button onClick={() => openPDF(visible.map(t => ({ticker:t, data:SCREENER_DATA[t], chartPeriod:"6M"})))}
+            style={{fontSize:"9px",padding:"5px 12px",borderRadius:"5px",cursor:"pointer",
+              background:"#1e2438",border:"1px solid #5a6478",color:"#787b86",
+              display:"flex",alignItems:"center",gap:"5px",transition:"all 0.12s"}}
+            onMouseEnter={e=>{e.currentTarget.style.color="#5b8af5";e.currentTarget.style.borderColor="#5b8af544";}}
+            onMouseLeave={e=>{e.currentTarget.style.color="#787b86";e.currentTarget.style.borderColor="#5a6478";}}>
+            ⎙ Exportar ({visible.length})
+          </button>
         </div>
       )}
 
-      {/* Grid */}
+      {/* Main content */}
       <div style={{flex:1,overflow:"auto",padding:"14px 16px"}}>
-        {allTickers.length === 0 ? (
+
+        {/* Empty state */}
+        {visible.length === 0 && pending.length === 0 && globalPool.length === 0 && (
           <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",
             height:"60vh",gap:"14px",color:"#5a6478",textAlign:"center"}}>
             <div style={{fontSize:"36px"}}>📊</div>
-            <div style={{fontSize:"13px",fontWeight:"600",color:"#787b86"}}>Nenhum dado ainda</div>
+            <div style={{fontSize:"13px",fontWeight:"600",color:"#787b86"}}>Ainda sem tickers</div>
             <div style={{fontSize:"11px",color:"#5a6478",maxWidth:"340px",lineHeight:1.6}}>
-              Usa o campo acima para adicionar tickers. O workflow do GitHub Actions vai buscar os dados e publicar a página actualizada.
+              Usa o campo acima para adicionar tickers. O GitHub Actions vai buscar os dados.
             </div>
           </div>
-        ) : visible.length === 0 ? (
-          <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"200px",
-            color:"#5a6478",textAlign:"center",fontSize:"12px"}}>
-            Nenhuma stock visível.{hidden.length > 0 && (
-              <a onClick={restoreHidden} style={{color:"#2962ff",cursor:"pointer",marginLeft:"4px"}}>
-                Mostrar ocultas?
-              </a>
-            )}
-          </div>
-        ) : (
+        )}
+
+        {/* My cards */}
+        {visible.length > 0 && (
           <div className="screener-grid" style={{display:"grid",
             gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,480px),1fr))",gap:"12px"}}>
             {visible.map(t => (
-              <ScreenerCard key={t} ticker={t} data={SCREENER_DATA[t]} onRemove={hide} onDelete={del}/>
+              <ScreenerCard key={t} ticker={t} data={SCREENER_DATA[t]} onRemove={handleRemove}/>
             ))}
+          </div>
+        )}
+
+        {/* Tickers in profile but not yet fetched */}
+        {pending.length > 0 && (
+          <div style={{marginTop: visible.length > 0 ? "24px" : 0}}>
+            <div style={{fontSize:"9px",color:"#5a6478",letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:"8px"}}>
+              A aguardar dados ({pending.length})
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>
+              {pending.map(t => (
+                <div key={t} style={{background:"#1a1f2e",border:"1px solid #2a3042",borderRadius:"6px",
+                  padding:"5px 10px",fontSize:"10px",color:"#6b7280",display:"flex",alignItems:"center",gap:"6px"}}>
+                  <span style={{width:"6px",height:"6px",borderRadius:"50%",background:"#F59E0B",flexShrink:0}}/>
+                  {t}
+                  <button onClick={() => handleRemove(t)}
+                    style={{background:"transparent",border:"none",color:"#5a6478",cursor:"pointer",fontSize:"11px",padding:"0 2px",lineHeight:1}}>×</button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Global pool: tickers available but not in this profile */}
+        {globalPool.length > 0 && (
+          <div style={{marginTop:"24px"}}>
+            <div style={{fontSize:"9px",color:"#5a6478",letterSpacing:"1.5px",textTransform:"uppercase",marginBottom:"8px"}}>
+              Pool global — clica para adicionar à tua lista ({globalPool.length})
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:"6px"}}>
+              {globalPool.map(t => (
+                <button key={t} onClick={() => handleAddFromPool(t)}
+                  style={{background:"#1a1f2e",border:"1px solid #2a3042",borderRadius:"6px",
+                    padding:"5px 10px",fontSize:"10px",color:"#6b7280",cursor:"pointer",
+                    display:"flex",alignItems:"center",gap:"5px",transition:"all 0.12s"}}
+                  onMouseEnter={e=>{e.currentTarget.style.color="#c8ccd4";e.currentTarget.style.borderColor="#2962ff44";}}
+                  onMouseLeave={e=>{e.currentTarget.style.color="#6b7280";e.currentTarget.style.borderColor="#2a3042";}}>
+                  <span style={{color:"#2962ff",fontWeight:"700"}}>+</span>
+                  {t}
+                  {SCREENER_DATA[t]?.name && <span style={{fontSize:"9px",color:"#5a6478"}}>· {SCREENER_DATA[t].name.split(" ")[0]}</span>}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
