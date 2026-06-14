@@ -324,45 +324,35 @@ function ProfileSetup({ onProfile }) {
 }
 
 /* ── ScreenerFetchBar ────────────────────────────────────────────────────── */
-function ScreenerFetchBar({ onFetched }) {
-  const [tickers,  setTickers]  = useState("");
-  const [mode,     setMode]     = useState("add");
-  const [status,   setStatus]   = useState("idle");
-  const [token,    setToken]    = useState(() => localStorage.getItem("gh_pat") || "");
-  const [patInput, setPatInput] = useState("");
-  const [errMsg,   setErrMsg]   = useState("");
-  const modalRef = useRef(null);
+function ScreenerFetchBar({ onFetched, profileId }) {
+  const [tickers, setTickers] = useState("");
+  const [mode,    setMode]    = useState("add");
+  const [status,  setStatus]  = useState("idle");
+  const [errMsg,  setErrMsg]  = useState("");
 
-  useEffect(() => {
-    if (status !== "pat-needed") return;
-    const h = e => { if (modalRef.current && !modalRef.current.contains(e.target)) setStatus("idle"); };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [status]);
-
-  const doFetch = async (pat) => {
+  const doFetch = async () => {
+    if (!tickers.trim() || status === "running") return;
     setStatus("running");
     try {
       const res = await fetch(
-        `https://api.github.com/repos/${GH_REPO}/actions/workflows/${GH_SCREENER_WORKFLOW}/dispatches`,
+        `${SUPABASE_URL}/functions/v1/dispatch`,
         {
           method: "POST",
           headers: {
-            "Authorization": `Bearer ${pat}`,
-            "Accept":        "application/vnd.github+json",
             "Content-Type":  "application/json",
+            "Authorization": `Bearer ${SUPABASE_KEY}`,
           },
-          body: JSON.stringify({ ref: "main", inputs: { tickers: tickers.trim(), mode } }),
+          body: JSON.stringify({ tickers: tickers.trim(), mode, profile_id: profileId }),
         }
       );
-      if (res.status === 204) {
+      const json = await res.json().catch(() => ({}));
+      if (res.ok) {
         setStatus("ok");
         setTimeout(() => setStatus("idle"), 10000);
         if (window.__startScreenerPolling) window.__startScreenerPolling();
         if (onFetched) onFetched(tickers.trim(), mode);
       } else {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.message || `HTTP ${res.status}`);
+        throw new Error(json.error || `HTTP ${res.status}`);
       }
     } catch(e) {
       setErrMsg(e.message);
@@ -371,29 +361,15 @@ function ScreenerFetchBar({ onFetched }) {
     }
   };
 
-  const handleFetch = () => {
-    if (!tickers.trim() || status === "running") return;
-    if (token) { doFetch(token); return; }
-    setStatus("pat-needed");
-  };
-
-  const handlePatSave = () => {
-    const pat = patInput.trim();
-    if (!pat) return;
-    localStorage.setItem("gh_pat", pat);
-    setToken(pat);
-    doFetch(pat);
-  };
-
   const btnColor = status==="ok"?"#22C55E":status==="err"?"#ef5350":status==="running"?"#F59E0B":"#2962ff";
-  const btnLabel = status==="running"?"⏳ A correr...":status==="ok"?"✓ Pedido enviado!":status==="err"?"✗ Erro":"Obter dados";
+  const btnLabel = status==="running"?"⏳ A correr...":status==="ok"?"✓ Pedido enviado!":status==="err"?`✗ ${errMsg}`:"Obter dados";
 
   return (
     <div style={{display:"flex",gap:"8px",alignItems:"center",flexWrap:"wrap"}}>
       <input
         value={tickers}
         onChange={e => setTickers(e.target.value)}
-        onKeyDown={e => e.key === "Enter" && handleFetch()}
+        onKeyDown={e => e.key === "Enter" && doFetch()}
         placeholder="AAPL, MSFT, NVDA..."
         style={{minWidth:"200px",maxWidth:"360px",flex:"1",background:"#131722",
           border:"1px solid #2a3042",borderRadius:"6px",padding:"6px 10px",
@@ -408,64 +384,13 @@ function ScreenerFetchBar({ onFetched }) {
           </button>
         ))}
       </div>
-      <div style={{position:"relative",flexShrink:0}}>
-        <button onClick={handleFetch}
-          disabled={!tickers.trim() || status === "running"}
-          style={{fontSize:"10px",fontWeight:"600",padding:"6px 14px",borderRadius:"6px",cursor:"pointer",
-            background:`${btnColor}22`,border:`1px solid ${!tickers.trim()?"#2a3042":btnColor}`,
-            color:!tickers.trim()?"#5a6478":btnColor,transition:"all 0.15s"}}>
-          {btnLabel}
-        </button>
-        {status === "pat-needed" && (
-          <div ref={modalRef} style={{position:"absolute",top:"calc(100% + 6px)",left:0,zIndex:200,
-            background:"#1e2438",border:"1px solid #2a3042",borderRadius:"10px",padding:"14px",
-            width:"270px",boxShadow:"0 8px 32px #00000099"}}>
-            <div style={{fontSize:"9px",fontWeight:"600",color:"#c8ccd4",marginBottom:"4px"}}>
-              GitHub Personal Access Token
-            </div>
-            <div style={{fontSize:"9px",color:"#6b7280",marginBottom:"10px",lineHeight:1.6}}>
-              Scope necessário: <span style={{color:"#2962ff",fontFamily:"monospace"}}>workflow</span>.{" "}
-              <a href="https://github.com/settings/tokens/new?scopes=workflow&description=Stock+Screener"
-                target="_blank" rel="noopener" style={{color:"#2962ff",textDecoration:"none"}}>
-                Criar token ↗
-              </a>
-            </div>
-            <input autoFocus value={patInput} onChange={e => setPatInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && handlePatSave()}
-              type="password" placeholder="ghp_xxxxxxxxxxxx"
-              style={{width:"100%",background:"#131722",border:"1px solid #2a3042",
-                borderRadius:"6px",padding:"6px 8px",color:"#c8ccd4",fontSize:"10px",
-                fontFamily:"monospace",outline:"none",marginBottom:"8px"}}/>
-            <div style={{display:"flex",gap:"6px",justifyContent:"flex-end"}}>
-              <button onClick={() => setStatus("idle")}
-                style={{fontSize:"9px",color:"#6b7280",background:"transparent",
-                  border:"1px solid #2a3042",borderRadius:"5px",padding:"4px 10px",cursor:"pointer"}}>
-                Cancelar
-              </button>
-              <button onClick={handlePatSave}
-                style={{fontSize:"9px",color:"#e0e3eb",background:"#2962ff",
-                  border:"1px solid #2962ff",borderRadius:"5px",padding:"4px 12px",fontWeight:"600",cursor:"pointer"}}>
-                Guardar & Correr
-              </button>
-            </div>
-            <div style={{fontSize:"9px",color:"#2a3042",marginTop:"8px",lineHeight:1.5}}>
-              Token guardado apenas neste browser (localStorage).
-            </div>
-          </div>
-        )}
-        {status === "err" && (
-          <div style={{position:"absolute",top:"calc(100% + 6px)",left:0,zIndex:200,
-            background:"#1A0000",border:"1px solid #7F1D1D",borderRadius:"6px",
-            padding:"8px 10px",width:"220px",fontSize:"9px",color:"#F87171"}}>
-            {errMsg}
-          </div>
-        )}
-      </div>
-      {status === "ok" && (
-        <span style={{fontSize:"9px",color:"#6b7280",letterSpacing:"0.3px"}}>
-          Aguarda ~1-2 min e actualiza a página
-        </span>
-      )}
+      <button onClick={doFetch}
+        disabled={!tickers.trim() || status === "running"}
+        style={{fontSize:"10px",fontWeight:"600",padding:"6px 14px",borderRadius:"6px",cursor:"pointer",
+          background:`${btnColor}22`,border:`1px solid ${!tickers.trim()?"#2a3042":btnColor}`,
+          color:!tickers.trim()?"#5a6478":btnColor,transition:"all 0.15s",flexShrink:0}}>
+        {btnLabel}
+      </button>
     </div>
   );
 }
@@ -1076,7 +1001,7 @@ function ScreenerView() {
             </div>
           )}
         </div>
-        <ScreenerFetchBar onFetched={handleFetched}/>
+        <ScreenerFetchBar onFetched={handleFetched} profileId={profile.id}/>
       </div>
 
       {/* Toolbar */}
