@@ -15,6 +15,7 @@ on:
         options:
           - add
           - replace
+          - remove
 
 concurrency:
   group: screener

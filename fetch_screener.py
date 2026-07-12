@@ -604,6 +604,19 @@ tickers = [t.strip().upper() for t in tickers_env.split(",") if t.strip()]
 print(f"Mode: {mode} | Tickers: {tickers}")
 
 os.makedirs("data", exist_ok=True)
+
+if mode == "remove":
+    existing = {}
+    if os.path.exists("data/screener.json"):
+        with open("data/screener.json", encoding="utf-8") as f:
+            existing = json.load(f)
+    removed = [t for t in tickers if existing.pop(t, None) is not None]
+    print(f"Removed: {removed or 'nothing'}")
+    with open("data/screener.json", "w", encoding="utf-8") as f:
+        json.dump(existing, f, ensure_ascii=False)
+    print(f"Done! Saved {len(existing)} tickers to data/screener.json")
+    sys.exit(0)
+
 existing = {}
 if mode == "add" and os.path.exists("data/screener.json"):
     with open("data/screener.json", encoding="utf-8") as f:

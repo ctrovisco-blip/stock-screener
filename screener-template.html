@@ -931,6 +931,20 @@ function ScreenerView() {
   /* Add ticker from global pool to profile */
   const handleAddFromPool = t => updateTickers([...new Set([...(profile?.tickers || []), t])]);
 
+  /* Delete ticker globally: remove from data/screener.json via workflow + from profile */
+  const handleDelete = async (t) => {
+    if (!window.confirm(`Apagar ${t} definitivamente?\n\nO ticker é removido da pool global para todos os utilizadores.`)) return;
+    updateTickers((profile?.tickers || []).filter(x => x !== t));
+    try {
+      await fetch(`${SUPABASE_URL}/functions/v1/dispatch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${SUPABASE_KEY}` },
+        body: JSON.stringify({ tickers: t, mode: "remove", profile_id: profile.id }),
+      });
+      if (window.__startScreenerPolling) window.__startScreenerPolling();
+    } catch(e) { console.error("Delete dispatch failed:", e); }
+  };
+
   /* Copy profile UUID to clipboard */
   const copyCode = () => {
     navigator.clipboard.writeText(profile.id).then(() => {
@@ -1051,7 +1065,7 @@ function ScreenerView() {
           <div className="screener-grid" style={{display:"grid",
             gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,480px),1fr))",gap:"12px"}}>
             {visible.map(t => (
-              <ScreenerCard key={t} ticker={t} data={SCREENER_DATA[t]} onRemove={handleRemove}/>
+              <ScreenerCard key={t} ticker={t} data={SCREENER_DATA[t]} onRemove={handleRemove} onDelete={handleDelete}/>
             ))}
           </div>
         )}
